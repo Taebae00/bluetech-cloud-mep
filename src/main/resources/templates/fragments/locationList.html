@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="locationList">
+    <div class="location-list"
+         th:if="${locationListData != null and !#lists.isEmpty(locationListData)}">
+
+        <div class="location-box"
+             th:each="loc : ${locationListData}"
+             th:if="${loc.locationName != '기본'}">
+
+            <div class="location-header">
+                <button type="button"
+                        class="location-title"
+                        onclick="toggleLocation(this)">
+                    <div class="location-title-left">
+                        <span class="location-title-main"
+                              th:text="${loc.locationName}">위치명</span>
+                    </div>
+                    <div class="location-title-right">
+                        <span class="location-progress-label">진행도</span>
+                        <span class="location-progress"
+                              th:text="|${loc.completed}/${loc.total}|">0/0</span>
+                    </div>
+                </button>
+            </div>
+
+            <div class="item-list">
+
+                <div class="location-inner-action-wrap">
+                    <button type="button"
+                            class="location-action-btn edit-location-btn"
+                            th:data-category-group="${loc.groupName}"
+                            th:data-location-name="${loc.locationName}"
+                            onclick="renameLocation(this)">
+                        위치/장비명 수정
+                    </button>
+
+                    <button type="button"
+                            class="location-action-btn delete-location-btn"
+                            th:data-category-group="${loc.groupName}"
+                            onclick="deleteLocation(this)">
+                        삭제
+                    </button>
+                </div>
+
+                <div class="item-card"
+                     th:each="item : ${entryValue}"
+                     th:with="
+                        isNormalEfficiencySheet=${#strings.contains(item.category, '효율시트') or #strings.contains(item.content, '효율시트')},
+                        isAirHandlerAirflowSheet=${#strings.contains(item.category, '공기조화기') and #strings.contains(item.content, '공기조화기') and #strings.contains(item.content, '풍량 상태')},
+                        isFanCoilControlSheet=${#strings.contains(item.category, '팬코일유닛') and #strings.contains(item.content, '팬코일 풍량 조절 상태')},
+                        isVentilationAirflowSheet=${#strings.contains(item.category, '환기설비') and #strings.contains(item.content, '급ㆍ배기 풍량 상태')},
+                        isAirflowSheet=${isAirHandlerAirflowSheet or isVentilationAirflowSheet},
+                        isSpecialSheet=${isNormalEfficiencySheet or isAirflowSheet or isFanCoilControlSheet},
+                        isSeoulType=${siteWorkType == '성능점검(서울형)'},
+                        isStatusPhotoItem=${#strings.contains(item.content, '현황사진') or #strings.contains(item.category, '현황사진')}
+                     "
+                     th:attr="data-current-result=${resultValueMap[loc.groupName + '_' + item.id] != null and !#strings.isEmpty(resultValueMap[loc.groupName + '_' + item.id]) ? resultValueMap[loc.groupName + '_' + item.id] : '미작성'}">
+
+                    <div class="item-row"
+                         th:classappend="${completedMap[loc.groupName + '_' + item.id] != null and completedMap[loc.groupName + '_' + item.id]} ? ' done' : ''">
+
+                        <span class="item-content-text"
+                              th:text="${siteWorkType == '현황표' ? item.category : item.order_no + '. ' + item.content}">
+                            점검내용
+                        </span>
+
+                        <div class="item-action-buttons">
+                            <button type="button"
+                                    class="status-btn status-default-btn">
+                                미작성
+                            </button>
+
+                            <button type="button"
+                                    class="status-btn status-na-btn"
+                                    th:if="${!isSpecialSheet}"
+                                    onclick="setItemResultAndSave(this, '해당사항없음')">
+                                해당사항없음
+                            </button>
+
+                            <button type="button"
+                                    class="item-toggle-btn"
+                                    th:data-item-id="${item.id}"
+                                    th:data-item-content="${item.content}"
+                                    th:data-category-group="${loc.groupName}"
+                                    onclick="toggleItemEditorByButton(this)">
+                                열기
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="item-editor">
+
+                        <!-- 풍량측정표 -->
+                        <div th:if="${isAirflowSheet}" class="airflow-sheet-wrap">
+                            <div th:if="${isAirHandlerAirflowSheet}">
+                                <div th:replace="~{fragments/airflowTables :: airflowTable(title='풍량측정표 (급기)', prefix='supply')}"></div>
+                                <div style="height:40px;"></div>
+                                <div th:replace="~{fragments/airflowTables :: airflowTable(title='풍량측정표 (환기)', prefix='return')}"></div>
+                            </div>
+
+                            <div th:if="${isVentilationAirflowSheet}">
+                                <div th:replace="~{fragments/airflowTables :: airflowTable(title='풍량측정표', prefix='ventilation')}"></div>
+                            </div>
+
+                            <textarea class="inline-memo airflow-json-memo" rows="4" style="display:none;"></textarea>
+
+                            <!-- 특수시트 공통 사진/메모 -->
+                            <div class="special-extra-wrap">
+                                <div class="photo-grid editor-photo-grid special-photo-grid">
+                                    <div class="photo-slot empty"
+                                         th:each="i : ${#numbers.sequence(1, 3)}"
+                                         onclick="handlePhotoSlotClick(this)">
+                                        <span class="photo-slot-text">+ 사진</span>
+                                        <img class="photo-slot-img" style="display:none;">
+                                        <span class="photo-save-badge">미저장</span>
+
+                                        <input type="file" class="inline-photo-input" accept="image/*" capture="environment" style="display:none;">
+                                        <input type="file" class="inline-gallery-input" accept="image/jpeg,image/png,image/webp" style="display:none;">
+
+                                        <button type="button"
+                                                class="photo-delete-btn"
+                                                style="display:none;"
+                                                onclick="removeInlinePhoto(event, this)">×</button>
+                                    </div>
+                                </div>
+
+                                <div class="photo-action-row">
+                                    <label class="attach-photo-btn">
+                                        사진첨부
+                                        <input type="file"
+                                               class="editor-gallery-input"
+                                               accept="image/*"
+                                               onchange="attachGalleryPhotoToSlot(this)"
+                                               style="display:none;">
+                                    </label>
+                                </div>
+
+                                <div class="modal-group">
+        <textarea class="inline-memo special-visible-memo"
+                  rows="3"
+                  placeholder="메모를 입력하세요"></textarea>
+                                </div>
+                            </div>
+
+                            <div class="inline-btn-wrap">
+                                <button type="button"
+                                        class="inline-save-btn"
+                                        th:data-item-id="${item.id}"
+                                        th:data-category-group="${loc.groupName}"
+                                        onclick="saveAirflowSheet(this)">
+                                    풍량측정표 저장
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 팬코일유닛 풍량조절표 -->
+                        <div th:if="${isFanCoilControlSheet}" class="fan-control-sheet-wrap">
+                            <div class="fan-control-title">풍량조절표</div>
+
+                            <div class="fan-control-table-scroll">
+                                <table class="fan-control-table">
+                                    <thead>
+                                    <tr>
+                                        <th rowspan="2">장비번호, 실명</th>
+                                        <th colspan="3">풍량 조절 상태</th>
+                                        <th rowspan="2">출구온도</th>
+                                        <th rowspan="2">점검결과</th>
+                                    </tr>
+                                    <tr>
+                                        <th>강</th>
+                                        <th>중</th>
+                                        <th>약</th>
+                                    </tr>
+                                    </thead>
+                                    <tbody>
+                                    <tr th:each="i : ${#numbers.sequence(1, 20)}">
+                                        <td><input type="text" class="fan-control-input" th:data-row="${i}" data-field="roomName"></td>
+                                        <td><input type="text" class="fan-control-input" th:data-row="${i}" data-field="strong"></td>
+                                        <td><input type="text" class="fan-control-input" th:data-row="${i}" data-field="middle"></td>
+                                        <td><input type="text" class="fan-control-input" th:data-row="${i}" data-field="weak"></td>
+                                        <td><input type="text" class="fan-control-input" th:data-row="${i}" data-field="outletTemp"></td>
+                                        <td><input type="text" class="fan-control-input" th:data-row="${i}" data-field="checkResult"></td>
+                                    </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <textarea class="inline-memo fan-control-json-memo" rows="4" style="display:none;"></textarea>
+
+                            <!-- 특수시트 공통 사진/메모 -->
+                            <div class="special-extra-wrap">
+                                <div class="photo-grid editor-photo-grid special-photo-grid">
+                                    <div class="photo-slot empty"
+                                         th:each="i : ${#numbers.sequence(1, 3)}"
+                                         onclick="handlePhotoSlotClick(this)">
+                                        <span class="photo-slot-text">+ 사진</span>
+                                        <img class="photo-slot-img" style="display:none;">
+                                        <span class="photo-save-badge">미저장</span>
+
+                                        <input type="file" class="inline-photo-input" accept="image/*" capture="environment" style="display:none;">
+                                        <input type="file" class="inline-gallery-input" accept="image/jpeg,image/png,image/webp" style="display:none;">
+
+                                        <button type="button"
+                                                class="photo-delete-btn"
+                                                style="display:none;"
+                                                onclick="removeInlinePhoto(event, this)">×</button>
+                                    </div>
+                                </div>
+
+                                <div class="photo-action-row">
+                                    <label class="attach-photo-btn">
+                                        사진첨부
+                                        <input type="file"
+                                               class="editor-gallery-input"
+                                               accept="image/*"
+                                               onchange="attachGalleryPhotoToSlot(this)"
+                                               style="display:none;">
+                                    </label>
+                                </div>
+
+                                <div class="modal-group">
+        <textarea class="inline-memo special-visible-memo"
+                  rows="3"
+                  placeholder="메모를 입력하세요"></textarea>
+                                </div>
+                            </div>
+
+                            <div class="inline-btn-wrap">
+                                <button type="button"
+                                        class="inline-save-btn"
+                                        th:data-item-id="${item.id}"
+                                        th:data-category-group="${loc.groupName}"
+                                        onclick="saveFanControlSheet(this)">
+                                    풍량조절표 저장
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 효율시트 -->
+                        <div th:if="${isNormalEfficiencySheet}" class="efficiency-sheet-wrap">
+                            <div class="efficiency-table-scroll">
+                                <table class="efficiency-table">
+                                    <thead>
+                                    <tr>
+                                        <th>순번</th>
+                                        <th>고온℃</th>
+                                        <th>저온℃</th>
+                                        <th>유량<br>LPM</th>
+                                        <th>열량<br>kcal/h</th>
+                                        <th>에너지<br>사용량</th>
+                                    </tr>
+                                    </thead>
+
+                                    <tbody>
+                                    <tr th:each="i : ${#numbers.sequence(1, 30)}">
+                                        <td th:text="${i}">1</td>
+                                        <td><input type="number" step="0.01" class="eff-input eff-calc-input" th:data-row="${i}" data-field="highTemp"></td>
+                                        <td><input type="number" step="0.01" class="eff-input eff-calc-input" th:data-row="${i}" data-field="lowTemp"></td>
+                                        <td><input type="number" step="0.01" class="eff-input eff-calc-input" th:data-row="${i}" data-field="flow"></td>
+                                        <td><input type="number" step="0.01" class="eff-input eff-heat" th:data-row="${i}" data-field="heat" readonly></td>
+                                        <td><input type="number" step="0.01" class="eff-input" th:data-row="${i}" data-field="energy"></td>
+                                    </tr>
+
+                                    <tr class="eff-summary-row">
+                                        <td>합계</td>
+                                        <td><input type="number" step="0.1" class="eff-input" data-summary="avgHighTemp" readonly></td>
+                                        <td><input type="number" step="0.1" class="eff-input" data-summary="avgLowTemp" readonly></td>
+                                        <td><input type="number" step="0.01" class="eff-input" data-summary="totalFlow" readonly></td>
+                                        <td><input type="number" step="0.01" class="eff-input" data-summary="totalHeat" readonly></td>
+                                        <td><input type="number" step="0.01" class="eff-input" data-summary="totalEnergy"></td>
+                                    </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="modal-group">
+                                <textarea class="inline-memo efficiency-json-memo" rows="4" style="display:none;"></textarea>
+                            </div>
+
+                            <div class="special-extra-wrap">
+                                <div class="photo-grid editor-photo-grid special-photo-grid">
+                                    <div class="photo-slot empty"
+                                         th:each="i : ${#numbers.sequence(1, 3)}"
+                                         onclick="handlePhotoSlotClick(this)">
+                                        <span class="photo-slot-text">+ 사진</span>
+                                        <img class="photo-slot-img" style="display:none;">
+                                        <span class="photo-save-badge">미저장</span>
+
+                                        <input type="file" class="inline-photo-input" accept="image/*" capture="environment" style="display:none;">
+                                        <input type="file" class="inline-gallery-input" accept="image/jpeg,image/png,image/webp" style="display:none;">
+
+                                        <button type="button"
+                                                class="photo-delete-btn"
+                                                style="display:none;"
+                                                onclick="removeInlinePhoto(event, this)">×</button>
+                                    </div>
+                                </div>
+
+                                <div class="photo-action-row">
+                                    <label class="attach-photo-btn">
+                                        사진첨부
+                                        <input type="file"
+                                               class="editor-gallery-input"
+                                               accept="image/*"
+                                               onchange="attachGalleryPhotoToSlot(this)"
+                                               style="display:none;">
+                                    </label>
+                                </div>
+
+                                <div class="modal-group">
+        <textarea class="inline-memo special-visible-memo"
+                  rows="3"
+                  placeholder="메모를 입력하세요"></textarea>
+                                </div>
+                            </div>
+
+                            <div class="inline-btn-wrap">
+                                <button type="button"
+                                        class="inline-save-btn"
+                                        th:data-item-id="${item.id}"
+                                        th:data-category-group="${loc.groupName}"
+                                        onclick="saveEfficiencySheet(this)">
+                                    효율시트 저장
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 서울형: 세부항목별 사진 2장 -->
+                        <div th:if="${!isSpecialSheet and isSeoulType and !isStatusPhotoItem}"
+                             class="seoul-sub-item-wrap">
+
+                            <div th:if="${item.subItems == null or #lists.isEmpty(item.subItems)}"
+                                 style="padding:12px; color:#ef4444; font-weight:700;">
+                                세부항목 데이터가 없습니다.
+                            </div>
+
+                            <div class="seoul-sub-item-box"
+                                 th:if="${item.subItems != null and !#lists.isEmpty(item.subItems)}"
+                                 th:each="sub : ${item.subItems}"
+                                 th:attr="data-sub-item-id=${sub.id}">
+
+                                <div class="seoul-sub-item-title"
+                                     th:text="${sub.content}">
+                                    세부항목
+                                </div>
+
+                                <div class="photo-grid editor-photo-grid seoul-photo-grid">
+                                    <div class="photo-slot empty"
+                                         th:each="i : ${#numbers.sequence(1, 2)}"
+                                         th:data-item-id="${item.id}"
+                                         th:data-sub-item-id="${sub.id}"
+                                         th:data-category-group="${loc.groupName}"
+                                         onclick="handlePhotoSlotClick(this)">
+                                        <span class="photo-slot-text">+ 사진</span>
+                                        <img class="photo-slot-img" style="display:none;">
+                                        <span class="photo-save-badge">미저장</span>
+
+                                        <input type="file" class="inline-photo-input" accept="image/*" capture="environment" style="display:none;">
+                                        <input type="file" class="inline-gallery-input" accept="image/jpeg,image/png,image/webp" style="display:none;">
+
+                                        <button type="button"
+                                                class="photo-delete-btn"
+                                                style="display:none;"
+                                                onclick="removeInlinePhoto(event, this)">×</button>
+                                    </div>
+                                </div>
+
+                                <div class="photo-action-row">
+                                    <label class="attach-photo-btn">
+                                        갤러리 사진 첨부하기
+                                        <input type="file"
+                                               class="editor-gallery-input"
+                                               accept="image/*"
+                                               th:data-item-id="${item.id}"
+                                               th:data-sub-item-id="${sub.id}"
+                                               th:data-category-group="${loc.groupName}"
+                                               onchange="attachGalleryPhotoToSlot(this)"
+                                               style="display:none;">
+                                    </label>
+                                </div>
+
+                                <div class="modal-group">
+    <textarea class="inline-memo"
+              rows="4"
+              placeholder="메모를 입력하세요"></textarea>
+                                </div>
+
+                                <div class="inline-btn-wrap">
+                                    <button type="button"
+                                            class="inline-save-btn"
+                                            th:data-item-id="${item.id}"
+                                            th:data-sub-item-id="${sub.id}"
+                                            th:data-category-group="${loc.groupName}"
+                                            onclick="saveInlineInspection(this)"
+                                            style="display:none;">
+                                        로컬 저장
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 일반 점검항목 + 서울형 현황사진 -->
+                        <div th:if="${!isSpecialSheet and (!isSeoulType or isStatusPhotoItem)}">
+
+                            <div class="photo-grid editor-photo-grid">
+                                <div class="photo-slot empty"
+                                     th:each="i : ${#numbers.sequence(1, 6)}"
+                                     onclick="handlePhotoSlotClick(this)">
+                                    <span class="photo-slot-text">+ 현장사진</span>
+                                    <img class="photo-slot-img" style="display:none;">
+                                    <span class="photo-save-badge">미저장</span>
+
+                                    <input type="file" class="inline-photo-input" accept="image/*" capture="environment" style="display:none;">
+                                    <input type="file" class="inline-gallery-input" accept="image/jpeg,image/png,image/webp" style="display:none;">
+
+                                    <button type="button"
+                                            class="photo-delete-btn"
+                                            style="display:none;"
+                                            onclick="removeInlinePhoto(event, this)">×</button>
+                                </div>
+                            </div>
+
+                            <div class="photo-action-row">
+                                <label class="attach-photo-btn">
+                                    사진첨부
+                                    <input type="file"
+                                           class="editor-gallery-input"
+                                           accept="image/*"
+                                           onchange="attachGalleryPhotoToSlot(this)"
+                                           style="display:none;">
+                                </label>
+                            </div>
+
+                            <div class="modal-group">
+                                <textarea class="inline-memo"
+                                          rows="4"
+                                          placeholder="메모를 입력하세요"></textarea>
+                            </div>
+
+                            <div class="inline-btn-wrap">
+                                <button type="button"
+                                        class="inline-save-btn"
+                                        th:data-item-id="${item.id}"
+                                        th:data-category-group="${loc.groupName}"
+                                        onclick="saveInlineInspection(this)"
+                                        style="display:none;">
+                                    로컬 저장
+                                </button>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

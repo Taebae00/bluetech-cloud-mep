@@ -2,6 +2,43 @@
     box-sizing: border-box;
 }
 
+
+.company-footer {
+    margin-top: 40px;
+    padding: 20px;
+    border-top: 1px solid #e5e7eb;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+
+    background: #fff;
+}
+
+.footer-logo {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+}
+
+.footer-info {
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.5;
+}
+
+.logo-area {
+    text-align: center;
+    margin-bottom: 12px;
+}
+
+.logo-img {
+    width: 220px;
+    max-width: 80%;
+    height: auto;
+}
+
 body {
     margin: 0;
     font-family: Arial, sans-serif;
@@ -124,26 +161,6 @@ body {
     margin-bottom: 16px;
 }
 
-.modal-group label {
-    display: block;
-    margin-bottom: 8px;
-    font-size: 14px;
-    color: #555;
-}
-
-.modal-group input {
-    width: 100%;
-    height: 44px;
-    border: 1px solid #dcdcdc;
-    border-radius: 12px;
-    padding: 0 12px;
-    font-size: 14px;
-}
-
-.modal-group input:focus {
-    outline: none;
-    border-color: #2563eb;
-}
 
 .modal-btn-wrap {
     display: flex;
@@ -168,4 +185,284 @@ body {
 .modal-save {
     background: #2563eb;
     color: #fff;
+}
+
+.top-bar {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.user-info {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: #475569;
+    line-height: 1.5;
+    word-break: keep-all;
+}
+
+.top-btns {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.admin-btn,
+.logout-btn {
+    border: none;
+    border-radius: 8px;
+    color: white;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 8px 12px;
+    min-width: 72px;
+}
+
+.admin-btn {
+    background: #2563eb;
+}
+
+.logout-btn {
+    background: #ef4444;
+}
+
+.admin-btn:hover {
+    background: #1d4ed8;
+}
+
+.logout-btn:hover {
+    background: #dc2626;
+}
+
+.user-info {
+    font-size: 13px;
+    font-weight: 600;
+    color: #475569;
+}
+
+.logout-btn {
+    border: none;
+    background: #ef4444;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.logout-btn:hover {
+    background: #dc2626;
+}
+
+.category-box {
+    max-height: 260px;
+    overflow-y: auto;
+    border: 1px solid #dcdfe6;
+    border-radius: 10px;
+    padding: 12px;
+    background: #fafafa;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.category-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 15px;
+    color: #333;
+    line-height: 1.4;
+}
+
+.category-item:hover {
+    background: #f5f9ff;
+    border-color: #bcd3ff;
+}
+
+.category-item span {
+    flex: 1;
+    text-align: left;
+    word-break: keep-all;
+}
+
+.category-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.category-top-btns {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.category-top-btns button {
+    border: none;
+    background: #4f6db8;
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.category-top-btns button:hover {
+    opacity: 0.9;
+}
+
+
+.worktype-wrap label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.modal-box {
+    width: 90%;
+    max-width: 520px;
+    max-height: 85vh;
+    overflow-y: auto;
+    background: #fff;
+    border-radius: 16px;
+    padding: 24px 20px;
+    box-sizing: border-box;
+}
+
+.category-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 15px;
+    color: #333;
+    line-height: 1.4;
+    justify-content: flex-start;
+}
+
+.modal-label {
+    display: block;
+    margin-bottom: 10px;
+    font-size: 14px;
+    color: #555;
+    font-weight: 600;
+}
+
+.modal-group > input[type="text"] {
+    width: 100%;
+    height: 52px;
+    border: 1px solid #dcdcdc;
+    border-radius: 14px;
+    padding: 0 14px;
+    font-size: 16px;
+}
+
+.modal-group > input[type="text"]:focus {
+    outline: none;
+    border-color: #2563eb;
+}
+
+.worktype-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+}
+
+.worktype-item {
+    border: 1px solid #d9dde5;
+    border-radius: 16px;
+    background: #fff;
+    min-height: 106px;
+    padding: 14px 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+
+    text-align: center;
+    box-sizing: border-box;
+    margin: 0;
+    position: relative;
+}
+
+.worktype-item:hover {
+    border-color: #4f6db8;
+    background: #f7faff;
+}
+
+.worktype-item input[type="radio"] {
+    display: none;
+}
+
+.worktype-item .circle {
+    width: 26px;
+    height: 26px;
+    border: 2px solid #aeb4bf;
+    border-radius: 50%;
+    position: relative;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    background: #fff;
+}
+
+.worktype-item span {
+    font-size: 16px;
+    line-height: 1.2;
+    font-weight: 600;
+    color: #444;
+    word-break: keep-all;
+}
+
+.worktype-item input[type="radio"]:checked + .circle {
+    border-color: #4f6db8;
+}
+
+.worktype-item input[type="radio"]:checked + .circle::after {
+    content: "";
+    width: 12px;
+    height: 12px;
+    background: #4f6db8;
+    border-radius: 50%;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+}
+
+.worktype-item:has(input[type="radio"]:checked) {
+    border-color: #4f6db8;
+    background: #eef4ff;
+}
+
+.worktype-item:has(input[type="radio"]:checked) span {
+    color: #2f4f9d;
 }

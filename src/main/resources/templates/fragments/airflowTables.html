@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<div th:fragment="airflowTable(title, prefix)" class="airflow-table-box">
+
+    <div class="airflow-table-title" th:text="${title}">
+        풍량측정표
+    </div>
+
+    <div class="airflow-table-scroll">
+        <table class="airflow-table">
+            <tbody>
+            <tr>
+                <th>측정 위치</th>
+                <th>A</th>
+                <th>B</th>
+                <th>C</th>
+                <th>D</th>
+                <th>E</th>
+                <th>F</th>
+            </tr>
+
+            <tr th:each="i : ${#numbers.sequence(1, 8)}">
+                <th th:text="${i}">1</th>
+                <td th:each="col : ${#strings.arraySplit('A,B,C,D,E,F', ',')}">
+                    <input type="number"
+                           step="0.01"
+                           class="airflow-input"
+                           th:data-table="${prefix}"
+                           th:data-row="${i}"
+                           th:data-col="${col}">
+                </td>
+            </tr>
+
+            <tr>
+                <th>평균풍속</th>
+                <td colspan="6">
+                    <input type="number"
+                           step="0.01"
+                           class="airflow-summary-input"
+                           th:data-table="${prefix}"
+                           data-summary="avgSpeed"
+                    readonly>
+                    m/s
+                </td>
+            </tr>
+            </tbody>
+        </table>
+
+        <table class="airflow-detail-table">
+            <tbody>
+            <tr>
+                <th>항목</th>
+                <th>단위</th>
+                <th>설계값</th>
+                <th>측정값</th>
+            </tr>
+
+            <tr>
+                <th>덕트사이즈</th>
+                <td>m</td>
+                <td>
+                    <input type="number" step="0.01"
+                           class="airflow-summary-input"
+                           th:data-table="${prefix}"
+                           data-summary="ductWidth"
+                           placeholder="가로">
+                </td>
+                <td>
+                    <input type="number" step="0.01"
+                           class="airflow-summary-input"
+                           th:data-table="${prefix}"
+                           data-summary="ductHeight"
+                           placeholder="세로">
+                </td>
+            </tr>
+
+            <tr>
+                <th>단면적</th>
+                <td>㎡</td>
+                <td colspan="2">
+                    <input type="number" step="0.01"
+                           class="airflow-summary-input"
+                           th:data-table="${prefix}"
+                           data-summary="area"
+                    readonly>
+                </td>
+            </tr>
+
+            <tr>
+                <th>풍량</th>
+                <td>CMH</td>
+                <td>
+                    <input type="number" step="0.01"
+                           class="airflow-summary-input"
+                           th:data-table="${prefix}"
+                           data-summary="designAirflow">
+                </td>
+                <td>
+                    <input type="number" step="0.01"
+                           class="airflow-summary-input"
+                           th:data-table="${prefix}"
+                           data-summary="measuredAirflow"
+                    readonly>
+                </td>
+            </tr>
+
+            <tr>
+                <th>설계 대비</th>
+                <td>%</td>
+                <td colspan="2">
+                    <input type="number" step="0.01"
+                           class="airflow-summary-input"
+                           th:data-table="${prefix}"
+                           data-summary="designRate">
+                </td>
+            </tr>
+
+            <tr>
+                <th>운전 전류</th>
+                <td>A</td>
+                <td colspan="2">
+                    <input type="number" step="0.01"
+                           class="airflow-summary-input"
+                           th:data-table="${prefix}"
+                           data-summary="current">
+                </td>
+            </tr>
+
+            <tr>
+                <th>인버터 제어시</th>
+                <td>Hz</td>
+                <td colspan="2">
+                    <input type="number" step="0.01"
+                           class="airflow-summary-input"
+                           th:data-table="${prefix}"
+                           data-summary="inverterHz">
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+</body>
+</html>

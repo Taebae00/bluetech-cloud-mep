@@ -6,6 +6,7 @@ import com.example.bluetechcloud.entity.SiteEntity;
 import com.example.bluetechcloud.model.SiteDTO;
 import com.example.bluetechcloud.repository.InspectionResultRepo;
 import com.example.bluetechcloud.repository.PhotoRepo;
+import com.example.bluetechcloud.repository.SiteInspectionItemRepo;
 import com.example.bluetechcloud.repository.SiteRepo;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
@@ -21,15 +22,17 @@ public class SiteService {
     private final InspectionResultRepo inspectionResultRepo;
     private final PhotoRepo photoRepo;
     private final FileService fileService;
+    private final SiteInspectionItemRepo siteInspectionItemRepo;
 
     public SiteService(SiteRepo siteRepo,
                        InspectionResultRepo inspectionResultRepo,
                        PhotoRepo photoRepo,
-                       FileService fileService) {
+                       FileService fileService, SiteInspectionItemRepo siteInspectionItemRepo) {
         this.siteRepo = siteRepo;
         this.inspectionResultRepo = inspectionResultRepo;
         this.photoRepo = photoRepo;
         this.fileService = fileService;
+        this.siteInspectionItemRepo = siteInspectionItemRepo;
     }
 
     public List<SiteDTO> getList(Long userId){
@@ -99,6 +102,7 @@ public class SiteService {
         }
 
         inspectionResultRepo.deleteBySiteId(siteId);
+        siteInspectionItemRepo.deleteBySiteId(siteId);
         siteRepo.deleteById(siteId);
     }
 }

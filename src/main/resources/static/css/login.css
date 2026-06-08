@@ -12,6 +12,15 @@ body {
     justify-content: center;
 }
 
+.logo-subtitle {
+    margin: 8px 0 22px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #64748b;
+    text-align: center;
+    line-height: 1.5;
+}
+
 .wrap {
     width: 100%;
     max-width: 420px;
@@ -78,4 +87,58 @@ body {
     .login-card {
         padding: 24px 16px;
     }
+}
+
+.login-options {
+    margin: 14px 0 18px;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.check-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    color: #444;
+    cursor: pointer;
+}
+
+
+.company-footer {
+    margin-top: 40px;
+    padding: 20px;
+    border-top: 1px solid #e5e7eb;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+
+    background: #fff;
+}
+
+.footer-logo {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+}
+
+.footer-info {
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.5;
+}
+
+.logo-area {
+    text-align: center;
+    margin-bottom: 12px;
+}
+
+.logo-img {
+    width: 220px;
+    max-width: 80%;
+    height: auto;
 }

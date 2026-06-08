@@ -30,4 +30,10 @@ public class UserEntity {
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
+    @Column(name = "remember_token")
+    private String rememberToken;
+
+    @Column(name = "remember_token_expiry")
+    private LocalDateTime rememberTokenExpiry;
+
 }

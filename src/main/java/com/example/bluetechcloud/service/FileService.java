@@ -48,7 +48,9 @@ public class FileService {
     }
 
     public void delete(String fileUrl) {
-        String prefix = "https://" + bucket + ".s3.ap-northeast-2.amazonaws.com/";
+        if (fileUrl == null || fileUrl.isBlank()) return;
+
+        String prefix = "https://" + bucket + ".s3." + region + ".amazonaws.com/";
         String key = fileUrl.replace(prefix, "");
 
         DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder()

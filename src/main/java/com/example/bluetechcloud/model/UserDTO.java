@@ -13,5 +13,6 @@ public class UserDTO {
     private String name;
     private String role;
     private LocalDateTime created_at;
-
+    private String remember_token;
+    private LocalDateTime remember_token_expiry;
 }

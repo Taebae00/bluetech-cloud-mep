@@ -97,10 +97,6 @@ public class InspectionItemService {
             throw new IllegalArgumentException("템플릿 카테고리를 찾을 수 없습니다.");
         }
 
-        // inspection_item 자체를 복제하는 구조가 아니라
-        // 지금 네 서비스 구조상 category_group 기반으로 location을 관리하니까
-        // 여기 메서드는 사실상 안 쓰는 게 맞다.
-        // 남겨두려면 최소한 템플릿 순서대로 복사되게는 맞춰둔다.
         for (InspectionItemEntity template : templateItems) {
             InspectionItemEntity entity = new InspectionItemEntity();
             entity.setCategory(template.getCategory());

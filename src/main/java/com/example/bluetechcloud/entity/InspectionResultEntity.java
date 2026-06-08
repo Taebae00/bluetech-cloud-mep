@@ -24,7 +24,8 @@ public class InspectionResultEntity {
     @Column(name = "result")
     private String result;
 
-    @Column(name = "memo")
+    @Lob
+    @Column(columnDefinition = "LONGTEXT")
     private String memo;
 
     @Column(name = "created_at")
@@ -32,4 +33,7 @@ public class InspectionResultEntity {
 
     @Column(name = "category_group")
     private String categoryGroup;
+
+    @Column(name = "sub_item_id")
+    private Long subItemId;
 }

@@ -3,13 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BlueTech-Cloud</title>
-    <link rel="icon" type="image/jpeg" href="/images/logo.jpg">
+    <title>BlueCheck</title>
+
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/logo_row.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/logo_row.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/logo_row.png">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#1e3a8a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="BlueCheck">
     <link rel="stylesheet" href="/css/site-write.css">
 </head>
 <body>
 
+<input type="hidden" id="siteTotalCount" th:value="${siteTotalCount}">
+
 <div class="wrap">
+
+    <div class="top-nav">
+        <button type="button" class="back-list-btn" onclick="location.href='/loginOk'">
+            ← 현장 목록
+        </button>
+
+        <button type="button" class="edit-category-btn" onclick="openCategoryEditModal()">
+            점검항목 추가
+        </button>
+    </div>
+
     <div class="brand-title">BlueTech-Cloud</div>
 
     <div class="welcome-text"
@@ -18,13 +39,41 @@
     </div>
 
     <div class="site-name"
-         th:text="|${site.site_name} 현장 (${siteCompletedCount}/${siteTotalCount})|">
-        현장명 (0/0)
+         th:text="|${site.site_name} 현장 ${siteWorkType} (${siteCompletedCount}/${siteTotalCount})|">
     </div>
 
-    <h2 class="page-title" th:text="${site.site_name} + ' 현장 점검 작성'">현장 점검 작성</h2>
+    <h2 class="page-title"
+        th:text="|${site.site_name} 현장 ${siteWorkType} 작성|">
+    </h2>
 
     <input type="hidden" id="siteId" th:value="${siteId}">
+
+    <button type="button" class="sync-btn" onclick="syncOfflineData()">
+        동기화
+    </button>
+
+    <div id="syncStatusModal" class="sync-status-modal" style="display:none;">
+        <div class="sync-status-modal-content">
+            <div class="sync-status-title" id="syncStatusTitle">동기화 중입니다...</div>
+
+            <div class="sync-progress-bar">
+                <div id="syncProgressFill" class="sync-progress-fill"></div>
+            </div>
+
+            <div id="syncProgressText" class="sync-progress-text">0%</div>
+            <div id="syncStatusSubtext" class="sync-status-subtext">잠시만 기다려주세요.</div>
+
+            <div class="sync-status-btn-wrap">
+                <button type="button"
+                        id="syncStatusCloseBtn"
+                        class="sync-status-close-btn"
+                        onclick="closeSyncStatusModal()"
+                        disabled>
+                    완료
+                </button>
+            </div>
+        </div>
+    </div>
 
     <div class="category-list">
         <div class="category-box" th:each="entry : ${baseGroupedItems}">
@@ -34,114 +83,116 @@
             </button>
 
             <div class="category-inner">
-                <div class="location-add-box">
-                    <input type="text"
-                           class="location-name-input"
-                           th:data-template-category="${entry.key}"
-                           placeholder="예: MDF실, 1층 EPS실">
-                    <button type="button"
-                            class="add-location-btn"
-                            th:data-template-category="${entry.key}"
-                            onclick="addLocation(this)">
-                        + 위치 추가
-                    </button>
-                </div>
 
-                <div class="location-list"
-                     th:if="${locationViewMap[entry.key] != null and !#lists.isEmpty(locationViewMap[entry.key])}">
-                    <div class="location-box"
-                         th:each="loc : ${locationViewMap[entry.key]}">
+                <!-- 현황표 -->
+                <div th:if="${siteWorkType == '현황표'}" class="status-direct-wrap">
+                    <div class="item-card"
+                         th:with="item=${entry.value[0]}"
+                         th:attr="data-current-result=${resultValueMap[entry.key + '_' + item.id] != null and !#strings.isEmpty(resultValueMap[entry.key + '_' + item.id]) ? resultValueMap[entry.key + '_' + item.id] : '미작성'}">
 
-                        <div class="location-header">
-                            <button type="button" class="location-title" onclick="toggleLocation(this)">
-                                <div class="location-title-left">
-                                    <span class="location-title-main"
-                                          th:text="${loc.locationName}">위치명</span>
-                                </div>
-                                <div class="location-title-right">
-                                    <span class="location-progress-label">진행도</span>
-                                    <span class="location-progress"
-                                          th:text="|${loc.completed}/${loc.total}|">0/0</span>
-                                </div>
-                            </button>
+                        <div class="item-row"
+                             th:classappend="${completedMap[entry.key + '_' + item.id] != null and completedMap[entry.key + '_' + item.id]} ? ' done' : ''">
 
-                            <button type="button"
-                                    class="delete-location-btn"
-                                    th:data-category-group="${loc.groupName}"
-                                    onclick="deleteLocation(this)">
-                                삭제
-                            </button>
-                        </div>
+                <span class="item-content-text"
+                      th:text="${entry.key}">
+                    점검항목명
+                </span>
 
-                        <div class="item-list">
-                            <div class="item-card" th:each="item : ${entry.value}">
-                                <div class="item-row"
-                                     th:classappend="${completedMap[loc.groupName + '_' + item.id] != null and completedMap[loc.groupName + '_' + item.id]} ? ' done' : ''">
+                            <div class="item-action-buttons">
+                                <button type="button"
+                                        class="status-btn status-default-btn">
+                                    미작성
+                                </button>
 
-                                    <button type="button"
-                                            class="item-status-badge status-open-btn"
-                                            th:data-item-id="${item.id}"
-                                            th:data-category-group="${loc.groupName}"
-                                            th:data-current-result="${resultValueMap[loc.groupName + '_' + item.id] != null ? resultValueMap[loc.groupName + '_' + item.id] : '미작성'}"
-                                            onclick="openResultModal(this)"
-                                            th:text="${resultValueMap[loc.groupName + '_' + item.id] != null and !#strings.isEmpty(resultValueMap[loc.groupName + '_' + item.id]) ? resultValueMap[loc.groupName + '_' + item.id] : '미작성'}">
-                                        미작성
-                                    </button>
-
-                                    <span class="item-content-text"
-                                          th:text="${item.order_no + '. ' + item.content}">
-            1. 점검내용
-        </span>
-
-                                    <button type="button"
-                                            class="item-toggle-btn"
-                                            th:data-item-id="${item.id}"
-                                            th:data-item-content="${item.content}"
-                                            th:data-category-group="${loc.groupName}"
-                                            onclick="toggleItemEditorByButton(this)">
-                                        열기
-                                    </button>
-                                </div>
-
-                                <div class="item-editor">
-                                    <div class="section-label">점검내용</div>
-                                    <div class="modal-content-text" th:text="${item.order_no + '. ' + item.content}">1. 점검내용</div>
-
-                                    <div class="section-label">사진첨부</div>
-                                    <div class="photo-grid editor-photo-grid">
-                                        <div class="photo-slot empty" onclick="triggerInlinePhotoInput(this)">
-                                            <span class="photo-slot-text">+ 현장사진</span>
-                                            <img class="photo-slot-img" style="display:none;">
-                                            <input type="file" class="inline-photo-input" accept="image/*" capture="environment" style="display:none;">
-                                            <button type="button" class="photo-delete-btn" style="display:none;" onclick="removeInlinePhoto(event, this)">×</button>
-                                        </div>
-                                        <div class="photo-slot empty" onclick="triggerInlinePhotoInput(this)">
-                                            <span class="photo-slot-text">+ 현장사진</span>
-                                            <img class="photo-slot-img" style="display:none;">
-                                            <input type="file" class="inline-photo-input" accept="image/*" capture="environment" style="display:none;">
-                                            <button type="button" class="photo-delete-btn" style="display:none;" onclick="removeInlinePhoto(event, this)">×</button>
-                                        </div>
-                                    </div>
-
-                                    <button type="button" class="add-photo-btn" onclick="addInlinePhotoSlot(this)">+ 사진추가</button>
-
-                                    <div class="modal-group">
-                                        <label>메모</label>
-                                        <textarea class="inline-memo" rows="4" placeholder="메모를 입력하세요"></textarea>
-                                    </div>
-
-                                    <div class="inline-btn-wrap">
-                                        <button type="button"
-                                                class="inline-save-btn"
-                                                th:data-item-id="${item.id}"
-                                                th:data-category-group="${loc.groupName}"
-                                                onclick="saveInlineInspection(this)">
-                                            저장
-                                        </button>
-                                    </div>
-                                </div>
+                                <button type="button"
+                                        class="status-btn status-na-btn"
+                                        onclick="setItemResultAndSave(this, '해당사항없음')">
+                                    해당사항없음
+                                </button>
                             </div>
                         </div>
+
+                        <div class="item-editor">
+                            <div class="photo-grid editor-photo-grid">
+                                <div class="photo-slot empty"
+                                     th:each="i : ${#numbers.sequence(1, 6)}"
+                                     onclick="handlePhotoSlotClick(this)">
+                                    <span class="photo-slot-text">+ 현장사진</span>
+                                    <img class="photo-slot-img" style="display:none;">
+
+                                    <span class="photo-save-badge">미저장</span>
+
+                                    <input type="file"
+                                           class="inline-photo-input"
+                                           accept="image/*"
+                                           capture="environment"
+                                           style="display:none;">
+
+                                    <input type="file"
+                                           class="inline-gallery-input"
+                                           accept="image/jpeg,image/png,image/webp"
+                                           style="display:none;">
+
+                                    <button type="button"
+                                            class="photo-delete-btn"
+                                            style="display:none;"
+                                            onclick="removeInlinePhoto(event, this)">×</button>
+                                </div>
+                            </div>
+
+                            <div class="photo-action-row">
+                                <label class="attach-photo-btn">
+                                    갤러리 사진 첨부하기
+                                    <input type="file"
+                                           class="editor-gallery-input"
+                                           accept="image/*"
+                                           onchange="attachGalleryPhotoToSlot(this)"
+                                           style="display:none;">
+                                </label>
+                            </div>
+
+                            <div class="modal-group">
+                                <textarea class="inline-memo" rows="4" placeholder="메모를 입력하세요"></textarea>
+                            </div>
+
+                            <div class="inline-btn-wrap">
+                                <button type="button"
+                                        class="inline-save-btn"
+                                        th:data-item-id="${item.id}"
+                                        th:data-category-group="${entry.key}"
+                                        onclick="saveInlineInspection(this)"
+                                        style="display:none;">
+                                    로컬 저장
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 성능점검 / 유지관리 -->
+                <div th:if="${siteWorkType != '현황표'}">
+                    <div class="location-add-box">
+                        <input type="text"
+                               class="location-name-input"
+                               th:data-template-category="${entry.key}"
+                               placeholder="예: MDF실, 1층 EPS실">
+                        <button type="button"
+                                class="add-location-btn"
+                                th:data-template-category="${entry.key}"
+                                onclick="addLocation(this)">
+                            + 장비번호·설치위치 추가
+                        </button>
+                    </div>
+
+                    <div th:with="
+    entryKey=${entry.key},
+    entryValue=${entry.value},
+    locationListData=${locationViewMap[entry.key]},
+    completedMap=${completedMap},
+    resultValueMap=${resultValueMap},
+    siteWorkType=${siteWorkType}">
+
+                        <div th:replace="~{fragments/locationList :: locationList}"></div>
 
                     </div>
                 </div>
@@ -151,19 +202,92 @@
 </div>
 
 <div class="danger-zone">
+
     <button type="button"
             class="download-site-btn"
-            th:onclick="|location.href='@{/site/{siteId}/download(siteId=${siteId})}'|">
+            onclick="openDownloadModal()">
         📦 사이트 사진 내려받기
+    </button>
+
+    <button type="button"
+            class="download-excel-btn"
+            th:onclick="|startExcelDownload(${siteId})|">
+        📄 엑셀 내려받기
     </button>
 
     <button type="button" class="delete-site-btn" id="deleteSiteBtn">
         ⚠️ 현장 삭제
     </button>
+</div>
 
-    <button type="button" class="logout-btn" id="logoutBtn">
-        로그아웃
-    </button>
+<div id="excelLoadingModal" class="sync-status-modal" style="display:none;">
+    <div class="sync-status-modal-content">
+        <div class="sync-status-title">엑셀 다운로드</div>
+
+        <div class="sync-progress-bar">
+            <div id="excelProgressFill" class="sync-progress-fill"></div>
+        </div>
+
+        <div id="excelProgressText" class="sync-progress-text">0%</div>
+
+        <div id="excelStatusText" class="sync-status-subtext">
+            엑셀 변환 중...
+        </div>
+
+        <div class="sync-status-btn-wrap">
+            <button id="excelCloseBtn"
+                    class="sync-status-close-btn"
+                    disabled
+                    onclick="closeExcelLoading()">
+                닫기
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="zipLoadingModal" class="sync-status-modal" style="display:none;">
+    <div class="sync-status-modal-content">
+        <div class="sync-status-title">다운로드 준비 중</div>
+
+        <div class="sync-progress-bar">
+            <div id="zipProgressFill" class="sync-progress-fill"></div>
+        </div>
+
+        <div id="zipProgressText" class="sync-progress-text">0%</div>
+
+        <div class="zip-spinner"></div>
+
+        <div id="zipStatusText" class="sync-status-subtext">
+            ZIP 파일 생성 중...
+        </div>
+
+        <div class="sync-status-btn-wrap">
+            <button id="zipCloseBtn"
+                    class="sync-status-close-btn"
+                    disabled
+                    onclick="closeZipLoading()">
+                닫기
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="downloadModal" class="result-modal" style="display:none;">
+    <div class="result-modal-content">
+        <div class="result-modal-title">다운로드 항목 선택</div>
+
+        <div class="category-top-btns">
+            <button type="button" id="downloadCheckAllBtn">전체선택</button>
+            <button type="button" id="downloadUncheckAllBtn">전체해제</button>
+        </div>
+
+        <div id="downloadItemBox" class="category-box" style="max-height: 400px; overflow-y: auto;"></div>
+
+        <div class="result-modal-btns">
+            <button type="button" class="result-cancel-btn" onclick="closeDownloadModal()">취소</button>
+            <button type="button" class="result-save-btn" onclick="submitSelectedDownload()">다운로드</button>
+        </div>
+    </div>
 </div>
 
 <div id="resultModal" class="result-modal" style="display:none;">
@@ -192,7 +316,36 @@
     </div>
 </div>
 
+<div id="categoryEditModal" class="result-modal" style="display:none;">
+    <div class="result-modal-content">
+        <div class="result-modal-title">점검항목 설정</div>
+
+        <div class="category-top-btns">
+            <button type="button" id="editCheckAllBtn">전체선택</button>
+            <button type="button" id="editUncheckAllBtn">전체해제</button>
+        </div>
+
+        <div id="categoryEditBox" class="category-box"></div>
+
+        <div class="result-modal-btns">
+            <button type="button" class="result-cancel-btn" onclick="closeCategoryEditModal()">취소</button>
+            <button type="button" class="result-save-btn" onclick="saveCategoryEdit()">저장</button>
+        </div>
+    </div>
+</div>
+
+<div id="photoPreviewModal" class="photo-preview-modal" style="display:none;" onclick="closePhotoPreview()">
+    <div class="photo-preview-content" onclick="event.stopPropagation()">
+        <button type="button" class="photo-preview-close" onclick="closePhotoPreview()">×</button>
+        <img id="photoPreviewImg" src="">
+        <div class="photo-preview-actions">
+            <button type="button" onclick="replacePreviewPhoto()">사진 교체</button>
+        </div>
+    </div>
+</div>
+<div th:replace="~{fragments/footer :: footer}"></div>
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="/js/offline-db.js"></script>
 <script src="/js/siteWrite.js"></script>
 </body>
 </html>
