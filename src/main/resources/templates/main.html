@@ -3,16 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BlueTech-Cloud</title>
+    <title>BlueCheck</title>
 
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.jpg">
-    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.jpg">
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.jpg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/logo_row.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/logo_row.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/logo_row.png">
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#1e3a8a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="BlueTech-Cloud">
+    <meta name="apple-mobile-web-app-title" content="BlueCheck">
 
     <link rel="stylesheet" href="/css/login.css">
 </head>
@@ -21,8 +21,10 @@
 <div class="wrap">
 
     <div class="login-card">
-        <h3 class="logo">Bluetech-Cloud</h3>
-        <p class="logo-subtitle">정보통신설비 유지보수·성능점검 시스템</p>
+        <div class="logo-area">
+            <img src="/images/logo_row.png" alt="BlueCheck" class="logo-img">
+        </div>
+        <p class="logo-subtitle">정보통신 / 기계설비 유지보수·성능점검 시스템</p>
 
         <form method="post" id="loginForm">
 
@@ -51,6 +53,7 @@
             <button type="submit" class="login-btn">로그인</button>
 
         </form>
+        <div th:replace="~{fragments/footer :: footer}"></div>
     </div>
 
 </div>

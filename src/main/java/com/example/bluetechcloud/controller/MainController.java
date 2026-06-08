@@ -20,6 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.*;
+import com.example.bluetechcloud.repository.InspectionSubItemRepo;
 
 @Controller
 public class MainController {
@@ -32,6 +33,7 @@ public class MainController {
     private final PhotoRepo photoRepo;
     private final SitePhotoService sitePhotoService;
     private final InspectionItemRepo inspectionItemRepo;
+    private final InspectionSubItemRepo inspectionSubItemRepo;
     private final SiteInspectionItemRepo siteInspectionItemRepo;
     private final ExcelReportService  excelReportService;
 
@@ -39,7 +41,7 @@ public class MainController {
                           InspectionItemService inspectionItemService,
                           InspectionResultService inspectionResultService,
                           FileService fileService, InspectionItemRepo inspectionItemRepo, UserRepo userRepo, PhotoRepo photoRepo,
-                          SitePhotoService sitePhotoService, InspectionItemRepo inspectionItemRepo1, SiteInspectionItemRepo siteInspectionItemRepo, ExcelReportService excelReportService) {
+                          SitePhotoService sitePhotoService, InspectionItemRepo inspectionItemRepo1, InspectionSubItemRepo inspectionSubItemRepo, SiteInspectionItemRepo siteInspectionItemRepo, ExcelReportService excelReportService) {
         this.userService = userService;
         this.siteService = siteService;
         this.inspectionItemService = inspectionItemService;
@@ -48,6 +50,7 @@ public class MainController {
         this.photoRepo = photoRepo;
         this.sitePhotoService = sitePhotoService;
         this.inspectionItemRepo = inspectionItemRepo1;
+        this.inspectionSubItemRepo = inspectionSubItemRepo;
         this.siteInspectionItemRepo = siteInspectionItemRepo;
         this.excelReportService = excelReportService;
     }
@@ -255,6 +258,10 @@ public class MainController {
             }
         }
 
+        if ("성능점검(서울형)".equals(siteWorkType)) {
+            fillSubItems(baseGroupedItems);
+        }
+
         List<InspectionResultDTO> resultList = inspectionResultService.getResultsBySiteId(siteId);
 
         Map<String, Boolean> completedMap = new HashMap<>();
@@ -277,7 +284,7 @@ public class MainController {
             group = group.trim();
 
             int idx = group.indexOf("_");
-            if (idx < 0) continue; // 위치 없는 group은 무시
+            if (idx < 0) continue;
 
             String baseCategory = group.substring(0, idx).trim();
             String locationName = group.substring(idx + 1).trim();
@@ -355,6 +362,37 @@ public class MainController {
         return "siteWrite";
     }
 
+    @PostMapping("/category/rename")
+    @ResponseBody
+    public ResponseEntity<?> renameCategoryGroup(@RequestParam Long siteId,
+                                                 @RequestParam String oldCategoryGroup,
+                                                 @RequestParam String newLocationName,
+                                                 HttpSession session) {
+
+        UserDTO user = checkLogin(session);
+        if (user == null) {
+            return ResponseEntity.status(401).body("로그인이 필요합니다.");
+        }
+
+        try {
+            String newGroupName = inspectionResultService.renameCategoryGroup(
+                    siteId,
+                    oldCategoryGroup,
+                    newLocationName
+            );
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("newGroupName", newGroupName);
+            result.put("newLocationName", newLocationName.trim());
+
+            return ResponseEntity.ok(result);
+
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
     @GetMapping("/category/location-list")
     public String getCategoryLocationList(@RequestParam Long siteId,
                                           @RequestParam String categoryName,
@@ -414,6 +452,11 @@ public class MainController {
             }
         }
 
+        // ✅ 성능점검(서울형)은 locationList fragment를 다시 불러올 때도 세부항목을 넣어줘야 함
+        if ("성능점검(서울형)".equals(siteWorkType)) {
+            fillSubItems(baseGroupedItems);
+        }
+
         List<InspectionResultDTO> resultList = inspectionResultService.getResultsBySiteId(siteId);
 
         Map<String, List<Map<String, Object>>> locationViewMap = new LinkedHashMap<>();
@@ -441,11 +484,21 @@ public class MainController {
             if (locationName.isBlank()) continue;
 
             String resultValue = result.getResult() == null ? "" : result.getResult().trim();
-            if ("작성".equals(resultValue) || "해당사항없음".equals(resultValue)) {
+            String memoValue = result.getMemo() == null ? "" : result.getMemo().trim();
+
+            boolean hasPhoto = !photoRepo.findByResultId(result.getId()).isEmpty();
+            boolean hasMemo = !memoValue.isBlank();
+
+            String normalizedResult = resultValue;
+            if (!"해당사항없음".equals(resultValue) && (hasPhoto || hasMemo)) {
+                normalizedResult = "작성";
+            }
+
+            if ("작성".equals(normalizedResult) || "해당사항없음".equals(normalizedResult)) {
                 completedMap.put(group + "_" + result.getItem_id(), true);
             }
 
-            resultValueMap.put(group + "_" + result.getItem_id(), resultValue);
+            resultValueMap.put(group + "_" + result.getItem_id(), normalizedResult);
             tempGroupSetMap.get(baseCategory).add(group);
         }
 
@@ -848,5 +901,72 @@ public class MainController {
     public void downloadExcel(@PathVariable Long siteId, HttpServletResponse response) throws IOException {
         excelReportService.downloadPerformanceCheckExcel(siteId, response);
     }
+
+    @PostMapping("/site/{siteId}/download-selected")
+    public void downloadSelected(@PathVariable Long siteId,
+                                 @RequestBody DownloadSelectedRequest request,
+                                 HttpServletResponse response,
+                                 HttpSession session) throws IOException {
+
+        UserDTO user = checkLogin(session);
+        if (user == null) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            return;
+        }
+
+        List<Long> itemIds = request.getItemIds() == null ? new ArrayList<>() : request.getItemIds();
+        List<String> categoryGroups = request.getCategoryGroups() == null ? new ArrayList<>() : request.getCategoryGroups();
+
+        if (itemIds.isEmpty() || categoryGroups.isEmpty() || itemIds.size() != categoryGroups.size()) {
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "다운로드 항목 정보가 올바르지 않습니다.");
+            return;
+        }
+
+        sitePhotoService.downloadSelectedZip(siteId, itemIds, categoryGroups, response);
+    }
+
+
+    public static class DownloadSelectedRequest {
+        private List<Long> itemIds;
+        private List<String> categoryGroups;
+
+        public List<Long> getItemIds() {
+            return itemIds;
+        }
+
+        public void setItemIds(List<Long> itemIds) {
+            this.itemIds = itemIds;
+        }
+
+        public List<String> getCategoryGroups() {
+            return categoryGroups;
+        }
+
+        public void setCategoryGroups(List<String> categoryGroups) {
+            this.categoryGroups = categoryGroups;
+        }
+    }
+
+    private void fillSubItems(Map<String, List<InspectionItemDTO>> baseGroupedItems) {
+        for (List<InspectionItemDTO> itemList : baseGroupedItems.values()) {
+            for (InspectionItemDTO item : itemList) {
+                List<InspectionSubItemDTO> subItems =
+                        inspectionSubItemRepo.findByItemIdOrderByOrderNoAsc(item.getId())
+                                .stream()
+                                .map(sub -> {
+                                    InspectionSubItemDTO dto = new InspectionSubItemDTO();
+                                    dto.setId(sub.getId());
+                                    dto.setItem_id(sub.getItemId());
+                                    dto.setContent(sub.getContent());
+                                    dto.setOrder_no(sub.getOrderNo());
+                                    return dto;
+                                })
+                                .toList();
+
+                item.setSubItems(subItems);
+            }
+        }
+    }
+
 }
 

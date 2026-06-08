@@ -20,4 +20,5 @@ public class InspectionResultDTO {
     private String memo;
     private LocalDateTime created_at;
     private String category_group;
+    private Long sub_item_id;
 }

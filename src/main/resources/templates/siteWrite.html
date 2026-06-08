@@ -3,8 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BlueTech-Cloud</title>
-    <link rel="icon" type="image/jpeg" href="/images/logo.jpg">
+    <title>BlueCheck</title>
+
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/logo_row.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/logo_row.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/logo_row.png">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#1e3a8a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="BlueCheck">
     <link rel="stylesheet" href="/css/site-write.css">
 </head>
 <body>
@@ -106,21 +114,42 @@
 
                         <div class="item-editor">
                             <div class="photo-grid editor-photo-grid">
-                                <div class="photo-slot empty" onclick="triggerInlinePhotoInput(this)">
+                                <div class="photo-slot empty"
+                                     th:each="i : ${#numbers.sequence(1, 6)}"
+                                     onclick="handlePhotoSlotClick(this)">
                                     <span class="photo-slot-text">+ 현장사진</span>
                                     <img class="photo-slot-img" style="display:none;">
-                                    <input type="file" class="inline-photo-input" accept="image/*" capture="environment" style="display:none;">
-                                    <button type="button" class="photo-delete-btn" style="display:none;" onclick="removeInlinePhoto(event, this)">×</button>
-                                </div>
-                                <div class="photo-slot empty" onclick="triggerInlinePhotoInput(this)">
-                                    <span class="photo-slot-text">+ 현장사진</span>
-                                    <img class="photo-slot-img" style="display:none;">
-                                    <input type="file" class="inline-photo-input" accept="image/*" capture="environment" style="display:none;">
-                                    <button type="button" class="photo-delete-btn" style="display:none;" onclick="removeInlinePhoto(event, this)">×</button>
+
+                                    <span class="photo-save-badge">미저장</span>
+
+                                    <input type="file"
+                                           class="inline-photo-input"
+                                           accept="image/*"
+                                           capture="environment"
+                                           style="display:none;">
+
+                                    <input type="file"
+                                           class="inline-gallery-input"
+                                           accept="image/jpeg,image/png,image/webp"
+                                           style="display:none;">
+
+                                    <button type="button"
+                                            class="photo-delete-btn"
+                                            style="display:none;"
+                                            onclick="removeInlinePhoto(event, this)">×</button>
                                 </div>
                             </div>
 
-                            <button type="button" class="add-photo-btn" onclick="addInlinePhotoSlot(this)">+ 사진추가</button>
+                            <div class="photo-action-row">
+                                <label class="attach-photo-btn">
+                                    갤러리 사진 첨부하기
+                                    <input type="file"
+                                           class="editor-gallery-input"
+                                           accept="image/*"
+                                           onchange="attachGalleryPhotoToSlot(this)"
+                                           style="display:none;">
+                                </label>
+                            </div>
 
                             <div class="modal-group">
                                 <textarea class="inline-memo" rows="4" placeholder="메모를 입력하세요"></textarea>
@@ -131,8 +160,9 @@
                                         class="inline-save-btn"
                                         th:data-item-id="${item.id}"
                                         th:data-category-group="${entry.key}"
-                                        onclick="saveInlineInspection(this)">
-                                    저장/닫기
+                                        onclick="saveInlineInspection(this)"
+                                        style="display:none;">
+                                    로컬 저장
                                 </button>
                             </div>
                         </div>
@@ -150,7 +180,7 @@
                                 class="add-location-btn"
                                 th:data-template-category="${entry.key}"
                                 onclick="addLocation(this)">
-                            + 위치 추가
+                            + 장비번호·설치위치 추가
                         </button>
                     </div>
 
@@ -172,19 +202,92 @@
 </div>
 
 <div class="danger-zone">
+
     <button type="button"
             class="download-site-btn"
-            th:onclick="|location.href='@{/site/{siteId}/download(siteId=${siteId})}'|">
+            onclick="openDownloadModal()">
         📦 사이트 사진 내려받기
+    </button>
+
+    <button type="button"
+            class="download-excel-btn"
+            th:onclick="|startExcelDownload(${siteId})|">
+        📄 엑셀 내려받기
     </button>
 
     <button type="button" class="delete-site-btn" id="deleteSiteBtn">
         ⚠️ 현장 삭제
     </button>
+</div>
 
-    <button type="button" class="logout-btn" id="logoutBtn">
-        로그아웃
-    </button>
+<div id="excelLoadingModal" class="sync-status-modal" style="display:none;">
+    <div class="sync-status-modal-content">
+        <div class="sync-status-title">엑셀 다운로드</div>
+
+        <div class="sync-progress-bar">
+            <div id="excelProgressFill" class="sync-progress-fill"></div>
+        </div>
+
+        <div id="excelProgressText" class="sync-progress-text">0%</div>
+
+        <div id="excelStatusText" class="sync-status-subtext">
+            엑셀 변환 중...
+        </div>
+
+        <div class="sync-status-btn-wrap">
+            <button id="excelCloseBtn"
+                    class="sync-status-close-btn"
+                    disabled
+                    onclick="closeExcelLoading()">
+                닫기
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="zipLoadingModal" class="sync-status-modal" style="display:none;">
+    <div class="sync-status-modal-content">
+        <div class="sync-status-title">다운로드 준비 중</div>
+
+        <div class="sync-progress-bar">
+            <div id="zipProgressFill" class="sync-progress-fill"></div>
+        </div>
+
+        <div id="zipProgressText" class="sync-progress-text">0%</div>
+
+        <div class="zip-spinner"></div>
+
+        <div id="zipStatusText" class="sync-status-subtext">
+            ZIP 파일 생성 중...
+        </div>
+
+        <div class="sync-status-btn-wrap">
+            <button id="zipCloseBtn"
+                    class="sync-status-close-btn"
+                    disabled
+                    onclick="closeZipLoading()">
+                닫기
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="downloadModal" class="result-modal" style="display:none;">
+    <div class="result-modal-content">
+        <div class="result-modal-title">다운로드 항목 선택</div>
+
+        <div class="category-top-btns">
+            <button type="button" id="downloadCheckAllBtn">전체선택</button>
+            <button type="button" id="downloadUncheckAllBtn">전체해제</button>
+        </div>
+
+        <div id="downloadItemBox" class="category-box" style="max-height: 400px; overflow-y: auto;"></div>
+
+        <div class="result-modal-btns">
+            <button type="button" class="result-cancel-btn" onclick="closeDownloadModal()">취소</button>
+            <button type="button" class="result-save-btn" onclick="submitSelectedDownload()">다운로드</button>
+        </div>
+    </div>
 </div>
 
 <div id="resultModal" class="result-modal" style="display:none;">
@@ -231,6 +334,16 @@
     </div>
 </div>
 
+<div id="photoPreviewModal" class="photo-preview-modal" style="display:none;" onclick="closePhotoPreview()">
+    <div class="photo-preview-content" onclick="event.stopPropagation()">
+        <button type="button" class="photo-preview-close" onclick="closePhotoPreview()">×</button>
+        <img id="photoPreviewImg" src="">
+        <div class="photo-preview-actions">
+            <button type="button" onclick="replacePreviewPhoto()">사진 교체</button>
+        </div>
+    </div>
+</div>
+<div th:replace="~{fragments/footer :: footer}"></div>
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="/js/offline-db.js"></script>
 <script src="/js/siteWrite.js"></script>

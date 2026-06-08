@@ -3,8 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BlueTech-Cloud</title>
-    <link rel="icon" type="image/jpeg" href="/images/logo.jpg">
+    <title>BlueCheck</title>
+
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/logo_row.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/logo_row.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/logo_row.png">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#1e3a8a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="BlueCheck">
 
     <link rel="stylesheet" href="/css/site-list.css">
 </head>
@@ -19,7 +27,18 @@
             <span>님 안전한 점검 되세요</span>
         </div>
 
-        <button type="button" id="logoutBtn" class="logout-btn">로그아웃</button>
+        <div class="top-btns">
+            <button type="button"
+                    class="admin-btn"
+                    th:if="${#strings.equalsIgnoreCase(userRole, 'ADMIN')}"
+                    onclick="location.href='/admin'">
+                회원관리
+            </button>
+
+            <button type="button" id="logoutBtn" class="logout-btn">
+                로그아웃
+            </button>
+        </div>
     </div>
     <h1 class="page-title">Site List</h1>
 
@@ -67,7 +86,13 @@
                 <label class="worktype-item">
                     <input type="radio" name="workType" value="성능점검" checked>
                     <div class="circle"></div>
-                    <span>성능점검</span>
+                    <span>성능점검(표준형)</span>
+                </label>
+
+                <label class="worktype-item">
+                    <input type="radio" name="workType" value="성능점검(서울형)">
+                    <div class="circle"></div>
+                    <span>성능점검(서울형)</span>
                 </label>
 
                 <label class="worktype-item">
@@ -99,7 +124,7 @@
         </div>
     </div>
 </div>
-
+<div th:replace="~{fragments/footer :: footer}"></div>
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script th:src="@{/js/InsertSite.js}"></script>
 </body>

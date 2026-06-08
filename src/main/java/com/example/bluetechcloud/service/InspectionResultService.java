@@ -233,15 +233,20 @@ public class InspectionResultService {
 
     @Transactional
     public void deleteCategoryGroup(Long siteId, String categoryGroup) {
-        List<InspectionResultEntity> list = inspectionResultRepo.findBySiteIdAndCategoryGroup(siteId, categoryGroup);
+        List<InspectionResultEntity> results =
+                inspectionResultRepo.findBySiteIdAndCategoryGroup(siteId, categoryGroup);
 
-        for (InspectionResultEntity result : list) {
+        for (InspectionResultEntity result : results) {
             List<PhotoEntity> photos = photoRepo.findByResultId(result.getId());
+
             for (PhotoEntity photo : photos) {
-                photoRepo.delete(photo);
+                fileService.delete(photo.getFileUrl());
             }
-            inspectionResultRepo.delete(result);
+
+            photoRepo.deleteByResultId(result.getId());
         }
+
+        inspectionResultRepo.deleteBySiteIdAndCategoryGroup(siteId, categoryGroup);
     }
 
     @Transactional
@@ -325,6 +330,44 @@ public class InspectionResultService {
         }
 
         return resultIdMap;
+    }
+
+    @Transactional
+    public String renameCategoryGroup(Long siteId, String oldCategoryGroup, String newLocationName) {
+        if (oldCategoryGroup == null || oldCategoryGroup.isBlank()) {
+            throw new IllegalArgumentException("기존 위치 정보가 없습니다.");
+        }
+
+        if (newLocationName == null || newLocationName.trim().isEmpty()) {
+            throw new IllegalArgumentException("새 위치명을 입력해주세요.");
+        }
+
+        String cleanLocation = newLocationName.trim();
+
+        if (cleanLocation.contains("_")) {
+            throw new IllegalArgumentException("위치명에는 _ 문자를 사용할 수 없습니다.");
+        }
+
+        int idx = oldCategoryGroup.indexOf("_");
+        if (idx < 0) {
+            throw new IllegalArgumentException("위치 정보 형식이 올바르지 않습니다.");
+        }
+
+        String baseCategory = oldCategoryGroup.substring(0, idx).trim();
+        String oldLocationName = oldCategoryGroup.substring(idx + 1).trim();
+        String newCategoryGroup = baseCategory + "_" + cleanLocation;
+
+        int updated = inspectionResultRepo.updateLocationNameBySiteId(
+                siteId,
+                oldLocationName,
+                cleanLocation
+        );
+
+        System.out.println("oldLocationName = " + oldLocationName);
+        System.out.println("newLocationName = " + cleanLocation);
+        System.out.println("updated result count = " + updated);
+
+        return newCategoryGroup;
     }
 
     @Transactional
