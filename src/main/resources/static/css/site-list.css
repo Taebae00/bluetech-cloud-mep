@@ -388,8 +388,8 @@ body {
 
 .worktype-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 14px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
 }
 
 .worktype-item {
@@ -465,4 +465,166 @@ body {
 
 .worktype-item:has(input[type="radio"]:checked) span {
     color: #2f4f9d;
+}
+
+@media (max-width: 430px) {
+    .worktype-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .worktype-item {
+        min-height: 72px;
+        flex-direction: row;
+        justify-content: flex-start;
+        padding: 12px 14px;
+        text-align: left;
+    }
+
+    .worktype-item span {
+        font-size: 15px;
+    }
+}
+
+.diagnosis-btn {
+    border: none;
+    border-radius: 8px;
+    background: #0f766e;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 8px 12px;
+    min-width: 96px;
+    white-space: nowrap;
+}
+
+.diagnosis-btn:hover {
+    background: #115e59;
+}
+
+.sync-status-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 20000;
+    padding: 20px;
+}
+
+.sync-status-modal-content {
+    width: 100%;
+    max-width: 380px;
+    max-height: 80vh;
+    overflow-y: auto;
+    background: #fff;
+    border-radius: 18px;
+    padding: 20px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.22);
+}
+
+.sync-status-title {
+    font-size: 20px;
+    font-weight: 800;
+    margin-bottom: 14px;
+    color: #111827;
+}
+
+.sync-status-subtext {
+    font-size: 13px;
+    color: #374151;
+    line-height: 1.6;
+}
+
+.sync-status-btn-wrap {
+    margin-top: 18px;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.sync-status-close-btn {
+    border: none;
+    border-radius: 10px;
+    background: #2563eb;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 10px 16px;
+    cursor: pointer;
+}
+
+/* 저장공간 진단 버튼 - 사이트 목록 모바일 최종 */
+.diagnosis-btn {
+    border: none;
+    border-radius: 8px;
+    background: #0f766e;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 8px 10px;
+    min-width: 90px;
+    height: 34px;
+    white-space: nowrap;
+}
+
+.diagnosis-btn:hover {
+    background: #115e59;
+}
+
+/* 상단 버튼 모바일 대응 */
+@media (max-width: 430px) {
+    .top-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+
+    .top-btns {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 6px;
+    }
+
+    .top-btns button {
+        width: 100%;
+        min-width: 0;
+        height: 36px;
+        padding: 0 6px;
+        font-size: 11px;
+        white-space: nowrap;
+    }
+}
+
+/* 저장공간 진단 모달 모바일 */
+#storageDiagnosisModal .sync-status-modal-content {
+    width: calc(100% - 28px);
+    max-width: 420px;
+    max-height: 82vh;
+    overflow-y: auto;
+    padding: 20px 16px;
+}
+
+#storageDiagnosisModal .sync-status-title {
+    text-align: center;
+    font-size: 18px;
+}
+
+#storageDiagnosisText {
+    font-size: 12px;
+    line-height: 1.55;
+    color: #334155;
+    word-break: break-all;
+    white-space: pre-line;
+}
+
+#storageDiagnosisModal .sync-status-btn-wrap {
+    justify-content: center;
+}
+
+#storageDiagnosisModal .sync-status-close-btn {
+    width: 100%;
+    height: 42px;
 }

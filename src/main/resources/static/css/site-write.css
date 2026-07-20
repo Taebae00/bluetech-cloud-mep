@@ -2336,6 +2336,180 @@ button.location-action-btn.delete-location-btn:hover {
     line-height: 1.15;
 }
 
-.efficiency-table-scroll {
-    overflow-x: hidden !important;
+/* 특수시트 모바일 최종: 숫자 4자리 이상 보이게 */
+.airflow-table-scroll,
+.efficiency-table-scroll,
+.fan-control-table-scroll {
+    width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+}
+
+/* 풍량측정표 */
+.airflow-table {
+    width: max-content !important;
+    min-width: 620px !important;
+    table-layout: auto !important;
+}
+
+.airflow-table th,
+.airflow-table td {
+    padding: 3px !important;
+    font-size: 11px !important;
+    white-space: nowrap !important;
+}
+
+.airflow-table th:first-child {
+    min-width: 42px !important;
+}
+
+.airflow-table input.airflow-input {
+    width: 52px !important;
+    min-width: 52px !important;
+    max-width: none !important;
+    height: 30px !important;
+    padding: 2px 3px !important;
+    font-size: 12px !important;
+}
+
+/* 풍량 상세표 */
+.airflow-detail-table {
+    width: max-content !important;
+    min-width: 520px !important;
+    table-layout: auto !important;
+}
+
+.airflow-detail-table input.airflow-summary-input {
+    width: 72px !important;
+    min-width: 72px !important;
+    max-width: none !important;
+    height: 30px !important;
+    font-size: 12px !important;
+}
+
+/* 효율시트 */
+.efficiency-table {
+    width: max-content !important;
+    min-width: 720px !important;
+    table-layout: auto !important;
+}
+
+.efficiency-table th,
+.efficiency-table td {
+    padding: 3px !important;
+    font-size: 11px !important;
+    white-space: nowrap !important;
+}
+
+.efficiency-table input.eff-input {
+    width: 62px !important;
+    min-width: 62px !important;
+    max-width: none !important;
+    height: 30px !important;
+    padding: 2px 3px !important;
+    font-size: 12px !important;
+}
+
+/* 비고칸 */
+.efficiency-table input.eff-note,
+.efficiency-table .eff-note {
+    width: 120px !important;
+    min-width: 120px !important;
+}
+
+/* 팬코일 풍량조절표 */
+.fan-control-table {
+    width: max-content !important;
+    min-width: 620px !important;
+    table-layout: auto !important;
+}
+
+.fan-control-table th,
+.fan-control-table td {
+    padding: 3px !important;
+    font-size: 11px !important;
+    white-space: nowrap !important;
+}
+
+.fan-control-table input.fan-control-input {
+    width: 70px !important;
+    min-width: 70px !important;
+    max-width: none !important;
+    height: 30px !important;
+    padding: 2px 3px !important;
+    font-size: 12px !important;
+}
+.seoul-photo-grid{
+    grid-template-columns: repeat(2, 1fr);
+}
+
+/* 저장공간 진단 버튼 - 모바일 최종 */
+.diagnosis-btn {
+    width: 100%;
+    height: 44px;
+    margin: 0 0 16px 0;
+    border: none;
+    border-radius: 10px;
+    background: #0f766e;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(15, 118, 110, 0.18);
+}
+
+.diagnosis-btn:hover {
+    background: #115e59;
+}
+
+/* 동기화 + 진단 버튼 나란히 */
+.sync-action-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.sync-action-row .sync-btn,
+.sync-action-row .diagnosis-btn {
+    width: 100%;
+    height: 44px;
+    margin: 0;
+    padding: 0 8px;
+    font-size: 14px;
+    white-space: nowrap;
+}
+
+/* 진단 모달 모바일 */
+#storageDiagnosisModal .sync-status-modal-content {
+    width: calc(100% - 28px);
+    max-width: 420px;
+    max-height: 82vh;
+    overflow-y: auto;
+    padding: 20px 16px;
+    text-align: left;
+}
+
+#storageDiagnosisModal .sync-status-title {
+    text-align: center;
+    font-size: 18px;
+    margin-bottom: 14px;
+}
+
+#storageDiagnosisText {
+    font-size: 12px;
+    line-height: 1.55;
+    color: #334155;
+    word-break: break-all;
+}
+
+#storageDiagnosisModal .sync-status-btn-wrap {
+    display: flex;
+    justify-content: center;
+    margin-top: 16px;
+}
+
+#storageDiagnosisModal .sync-status-close-btn {
+    width: 100%;
+    height: 42px;
 }

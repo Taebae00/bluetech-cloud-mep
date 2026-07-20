@@ -224,3 +224,103 @@ function saveCategoryEdit() {
         }
     });
 }
+
+async function openStorageDiagnosis() {
+    const modal = document.getElementById("storageDiagnosisModal");
+    const text = document.getElementById("storageDiagnosisText");
+
+    if (modal) modal.style.display = "flex";
+    if (text) text.textContent = "확인 중...";
+
+    try {
+        const photos = await OfflineDB.getAll("draft_photos");
+        const results = await OfflineDB.getAll("draft_results");
+
+        const siteIdEl = document.getElementById("siteId");
+        const siteId = siteIdEl && siteIdEl.value ? Number(siteIdEl.value) : null;
+
+        const sitePhotos = siteId
+            ? photos.filter(p => Number(p.siteId) === siteId)
+            : photos;
+
+        const siteResults = siteId
+            ? results.filter(r => Number(r.siteId) === siteId)
+            : results;
+
+        const scopeText = siteId
+            ? `현재 현장 ID: ${siteId}`
+            : "전체 로컬 데이터";
+
+        const totalBytes = sitePhotos.reduce((sum, p) => {
+            return sum + (p.fileBlob?.size || 0);
+        }, 0);
+
+        const pendingPhotos = sitePhotos.filter(p => p.syncStatus === "pending").length;
+        const failedPhotos = sitePhotos.filter(p => p.syncStatus === "failed" || p.lastError).length;
+        const deletePhotos = sitePhotos.filter(p => p.isDeleted === true).length;
+        const memoUpdatePhotos = sitePhotos.filter(p => p.isMemoUpdate === true).length;
+        const uploadingPhotos = sitePhotos.filter(p => p.uploading === true).length;
+
+        let usageText = "확인 불가";
+
+        if (navigator.storage && navigator.storage.estimate) {
+            const estimate = await navigator.storage.estimate();
+
+            const usageMB = estimate.usage
+                ? (estimate.usage / 1024 / 1024).toFixed(1)
+                : "0";
+
+            const quotaMB = estimate.quota
+                ? (estimate.quota / 1024 / 1024).toFixed(1)
+                : "0";
+
+            const percent = estimate.usage && estimate.quota
+                ? ((estimate.usage / estimate.quota) * 100).toFixed(1)
+                : "0";
+
+            usageText = `${usageMB}MB / ${quotaMB}MB (${percent}%)`;
+        }
+
+        const biggest = sitePhotos
+            .filter(p => p.fileBlob)
+            .sort((a, b) => (b.fileBlob?.size || 0) - (a.fileBlob?.size || 0))
+            .slice(0, 5)
+            .map((p, i) => {
+                const sizeMB = (p.fileBlob.size / 1024 / 1024).toFixed(1);
+                return `${i + 1}. ${sizeMB}MB / ${p.syncStatus || "-"} / ${p.createdAt || "-"}`;
+            })
+            .join("\n");
+
+        text.textContent =
+            `${scopeText}
+
+[로컬 데이터]
+사진 개수: ${sitePhotos.length}장
+점검 결과: ${siteResults.length}건
+사진 총 용량: ${(totalBytes / 1024 / 1024).toFixed(1)}MB
+
+[사진 상태]
+대기중: ${pendingPhotos}건
+실패/오류: ${failedPhotos}건
+삭제예약: ${deletePhotos}건
+메모수정: ${memoUpdatePhotos}건
+업로드중 표시: ${uploadingPhotos}건
+
+[브라우저 저장공간]
+${usageText}
+
+[큰 사진 TOP 5]
+${biggest || "없음"}`;
+
+    } catch (e) {
+        console.error(e);
+        if (text) {
+            text.textContent = "저장공간 진단 중 오류가 발생했습니다.\n\n" + (e.message || e);
+        }
+    }
+}
+
+function closeStorageDiagnosis() {
+    const modal = document.getElementById("storageDiagnosisModal");
+    if (modal) modal.style.display = "none";
+}

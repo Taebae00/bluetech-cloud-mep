@@ -126,9 +126,30 @@ public class InspectionResultService {
     }
 
     @Transactional(readOnly = true)
-    public InspectionResultEntity getInspectionResult(Long siteId, Long itemId, String categoryGroup) {
+    public InspectionResultEntity getInspectionResult(Long siteId,
+                                                      Long itemId,
+                                                      String categoryGroup,
+                                                      Long subItemId) {
+
+        Long normalizedSubItemId = (subItemId == null || subItemId == 0) ? null : subItemId;
+
+        if (normalizedSubItemId == null) {
+            return inspectionResultRepo
+                    .findFirstBySiteIdAndItemIdAndCategoryGroupAndSubItemIdIsNullOrderByIdDesc(
+                            siteId,
+                            itemId,
+                            categoryGroup
+                    )
+                    .orElse(null);
+        }
+
         return inspectionResultRepo
-                .findFirstBySiteIdAndItemIdAndCategoryGroupOrderByIdDesc(siteId, itemId, categoryGroup)
+                .findFirstBySiteIdAndItemIdAndCategoryGroupAndSubItemIdOrderByIdDesc(
+                        siteId,
+                        itemId,
+                        categoryGroup,
+                        normalizedSubItemId
+                )
                 .orElse(null);
     }
 
@@ -253,29 +274,56 @@ public class InspectionResultService {
     public void resetInspection(Long siteId,
                                 Long itemId,
                                 String categoryGroup,
+                                Long subItemId,
                                 String targetResult) {
 
-        InspectionResultEntity resultEntity = inspectionResultRepo
-                .findFirstBySiteIdAndItemIdAndCategoryGroupOrderByIdDesc(siteId, itemId, categoryGroup)
-                .orElseGet(() -> {
-                    InspectionResultEntity newEntity = new InspectionResultEntity();
-                    newEntity.setSiteId(siteId);
-                    newEntity.setItemId(itemId);
-                    newEntity.setCategoryGroup(categoryGroup);
-                    return newEntity;
-                });
+        Long normalizedSubItemId = normalizeSubItemId(subItemId);
 
-        // 기존 저장 사진 전부 삭제
-        List<PhotoEntity> photos = photoRepo.findByResultId(resultEntity.getId());
-        for (PhotoEntity photo : photos) {
-            fileService.delete(photo.getFileUrl());   // S3 삭제
-            photoRepo.delete(photo);                  // DB 삭제
+        InspectionResultEntity resultEntity;
+
+        if (normalizedSubItemId == null) {
+            resultEntity = inspectionResultRepo
+                    .findFirstBySiteIdAndItemIdAndCategoryGroupAndSubItemIdIsNullOrderByIdDesc(
+                            siteId,
+                            itemId,
+                            categoryGroup
+                    )
+                    .orElseGet(() -> {
+                        InspectionResultEntity newEntity = new InspectionResultEntity();
+                        newEntity.setSiteId(siteId);
+                        newEntity.setItemId(itemId);
+                        newEntity.setCategoryGroup(categoryGroup);
+                        newEntity.setSubItemId(null);
+                        return newEntity;
+                    });
+        } else {
+            resultEntity = inspectionResultRepo
+                    .findFirstBySiteIdAndItemIdAndCategoryGroupAndSubItemIdOrderByIdDesc(
+                            siteId,
+                            itemId,
+                            categoryGroup,
+                            normalizedSubItemId
+                    )
+                    .orElseGet(() -> {
+                        InspectionResultEntity newEntity = new InspectionResultEntity();
+                        newEntity.setSiteId(siteId);
+                        newEntity.setItemId(itemId);
+                        newEntity.setCategoryGroup(categoryGroup);
+                        newEntity.setSubItemId(normalizedSubItemId);
+                        return newEntity;
+                    });
         }
 
-        // 메모 비우기
+        if (resultEntity.getId() != null) {
+            List<PhotoEntity> photos = photoRepo.findByResultId(resultEntity.getId());
+            for (PhotoEntity photo : photos) {
+                fileService.delete(photo.getFileUrl());
+                photoRepo.delete(photo);
+            }
+        }
+
         resultEntity.setMemo("");
 
-        // 상태 저장
         if ("해당사항없음".equals(targetResult)) {
             resultEntity.setResult("해당사항없음");
         } else {
@@ -285,47 +333,60 @@ public class InspectionResultService {
         inspectionResultRepo.save(resultEntity);
     }
 
+    private Long normalizeSubItemId(Long subItemId) {
+        return (subItemId == null || subItemId == 0) ? null : subItemId;
+    }
+
     @Transactional
     public Map<String, Long> syncOffline(Long siteId, SyncRequest request) {
         Map<String, Long> resultIdMap = new HashMap<>();
 
-        if (request == null) {
+        if (request == null || request.getResults() == null) {
             return resultIdMap;
         }
 
-        if (request.getResults() != null) {
-            for (SyncResultItem item : request.getResults()) {
-                if (item.getSiteId() == null || item.getItemId() == null || item.getCategoryGroup() == null) {
-                    continue;
-                }
+        for (SyncResultItem item : request.getResults()) {
+            if (item.getItemId() == null || item.getCategoryGroup() == null) {
+                continue;
+            }
 
-                Optional<InspectionResultEntity> optional =
-                        inspectionResultRepo.findBySiteIdAndItemIdAndCategoryGroup(
-                                item.getSiteId(),
+            Long normalizedSubItemId =
+                    (item.getSubItemId() == null || item.getSubItemId() == 0)
+                            ? null
+                            : item.getSubItemId();
+
+            Optional<InspectionResultEntity> optional;
+
+            if (normalizedSubItemId == null) {
+                optional = inspectionResultRepo
+                        .findFirstBySiteIdAndItemIdAndCategoryGroupAndSubItemIdIsNullOrderByIdDesc(
+                                siteId,
                                 item.getItemId(),
                                 item.getCategoryGroup()
                         );
-
-                InspectionResultEntity entity = optional.orElseGet(InspectionResultEntity::new);
-
-                entity.setSiteId(item.getSiteId());
-                entity.setItemId(item.getItemId());
-                entity.setCategoryGroup(item.getCategoryGroup());
-                entity.setResult(item.getResult());
-                entity.setMemo(item.getMemo());
-
-                InspectionResultEntity saved = inspectionResultRepo.save(entity);
-
-                if (item.getDraftKey() != null) {
-                    resultIdMap.put(item.getDraftKey(), saved.getId());
-                }
+            } else {
+                optional = inspectionResultRepo
+                        .findFirstBySiteIdAndItemIdAndCategoryGroupAndSubItemIdOrderByIdDesc(
+                                siteId,
+                                item.getItemId(),
+                                item.getCategoryGroup(),
+                                normalizedSubItemId
+                        );
             }
-        }
 
-        if (request.getLocations() != null) {
-            for (SyncLocationItem loc : request.getLocations()) {
-                // 위치 add/delete는 나중에 붙여도 됨
-                // 1차는 결과/사진 동기화 먼저
+            InspectionResultEntity entity = optional.orElseGet(InspectionResultEntity::new);
+
+            entity.setSiteId(siteId);
+            entity.setItemId(item.getItemId());
+            entity.setCategoryGroup(item.getCategoryGroup());
+            entity.setSubItemId(normalizedSubItemId);
+            entity.setResult(item.getResult());
+            entity.setMemo(item.getMemo());
+
+            InspectionResultEntity saved = inspectionResultRepo.save(entity);
+
+            if (item.getDraftKey() != null) {
+                resultIdMap.put(item.getDraftKey(), saved.getId());
             }
         }
 
@@ -354,18 +415,18 @@ public class InspectionResultService {
         }
 
         String baseCategory = oldCategoryGroup.substring(0, idx).trim();
-        String oldLocationName = oldCategoryGroup.substring(idx + 1).trim();
         String newCategoryGroup = baseCategory + "_" + cleanLocation;
 
-        int updated = inspectionResultRepo.updateLocationNameBySiteId(
+        int updated = inspectionResultRepo.updateCategoryGroupBySiteId(
                 siteId,
-                oldLocationName,
-                cleanLocation
+                oldCategoryGroup,
+                newCategoryGroup
         );
 
-        System.out.println("oldLocationName = " + oldLocationName);
-        System.out.println("newLocationName = " + cleanLocation);
-        System.out.println("updated result count = " + updated);
+        System.out.println("[CategoryGroup Rename] siteId=" + siteId
+                + ", old=" + oldCategoryGroup
+                + ", new=" + newCategoryGroup
+                + ", updated=" + updated);
 
         return newCategoryGroup;
     }

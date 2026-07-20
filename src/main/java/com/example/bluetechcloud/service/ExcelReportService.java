@@ -6,6 +6,7 @@ import com.example.bluetechcloud.entity.PhotoEntity;
 import com.example.bluetechcloud.model.SiteDTO;
 import com.example.bluetechcloud.repository.InspectionItemRepo;
 import com.example.bluetechcloud.repository.InspectionResultRepo;
+import com.example.bluetechcloud.repository.InspectionSubItemRepo;
 import com.example.bluetechcloud.repository.PhotoRepo;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +38,11 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -52,38 +58,75 @@ public class ExcelReportService {
     private final InspectionItemRepo inspectionItemRepo;
     private final PhotoRepo photoRepo;
     private final ObjectMapper objectMapper;
+    private final InspectionSubItemRepo inspectionSubItemRepo;
 
+    private static final int EXCEL_PHOTO_MAX_WIDTH = 1200;
+    private static final int EXCEL_PHOTO_MAX_HEIGHT = 800;
+    private static final float EXCEL_PHOTO_QUALITY = 0.86f;
+
+    private static final int NORMAL_PHOTO_COL_WIDTH = 2330;
+    private static final int NORMAL_PHOTO_ROW_COUNT = 9;
+    private static final float NORMAL_PHOTO_ROW_HEIGHT = 15.8f;
+
+    private static final int SEOUL_PHOTO_COL_WIDTH = 2170;
+    private static final int SEOUL_PHOTO_ROW_COUNT = 10;
+    private static final float SEOUL_PHOTO_ROW_HEIGHT = 14.9f;
     public void downloadPerformanceCheckExcel(Long siteId, HttpServletResponse response) throws IOException {
+        long totalStart = System.currentTimeMillis();
+
         SiteDTO site = siteService.getSite(siteId);
 
-        // 해당 현장의 저장된 결과
         List<InspectionResultEntity> results = inspectionResultRepo.findBySiteId(siteId);
 
-        // 전체 점검항목
-        List<InspectionItemEntity> allItems = inspectionItemRepo.findAllByOrderByCategoryOrderAscOrderNoAscIdAsc();
+        List<Long> resultIds = results.stream()
+                .map(InspectionResultEntity::getId)
+                .filter(Objects::nonNull)
+                .toList();
 
-        /*
-         * 작성된 항목만 추림
-         * 기준:
-         * - result가 "작성"
-         * - result가 "해당사항없음"
-         * - 메모 있음
-         * - 사진 있음
-         */
-        List<Long> writtenItemIds = results.stream()
+        Map<Long, List<PhotoEntity>> photosByResultId = resultIds.isEmpty()
+                ? new HashMap<>()
+                : photoRepo.findByResultIdIn(resultIds)
+                .stream()
+                .collect(Collectors.groupingBy(PhotoEntity::getResultId));
+
+        List<InspectionItemEntity> allItems =
+                inspectionItemRepo.findAllByOrderByCategoryOrderAscOrderNoAscIdAsc();
+
+        Set<Long> writtenItemIdSet = results.stream()
                 .filter(result -> {
-                    List<PhotoEntity> photos = photoRepo.findByResultId(result.getId());
+                    List<PhotoEntity> photos = photosByResultId.getOrDefault(
+                            result.getId(),
+                            Collections.emptyList()
+                    );
                     return shouldRenderItemBlock(result, photos);
                 })
                 .map(InspectionResultEntity::getItemId)
                 .filter(Objects::nonNull)
-                .distinct()
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        List<InspectionItemEntity> items = allItems.stream()
+                .filter(item -> writtenItemIdSet.contains(item.getId()))
                 .toList();
 
-        // 엑셀에 넘길 items 자체를 작성된 항목만 남김
-        List<InspectionItemEntity> items = allItems.stream()
-                .filter(item -> writtenItemIds.contains(item.getId()))
+        List<PhotoEntity> renderPhotos = photosByResultId.values()
+                .stream()
+                .flatMap(List::stream)
+                .filter(photo -> photo.getId() != null)
                 .toList();
+
+        System.out.println("[Excel] 결과 수: " + results.size());
+        System.out.println("[Excel] 사진 수: " + renderPhotos.size());
+
+        long photoStart = System.currentTimeMillis();
+        Map<Long, byte[]> excelPhotoBytesMap = prepareExcelPhotoBytesMap(renderPhotos);
+        System.out.println("[Excel] 사진 다운로드/리사이즈: " + (System.currentTimeMillis() - photoStart) + "ms");
+
+        long totalPhotoBytes = excelPhotoBytesMap.values()
+                .stream()
+                .mapToLong(bytes -> bytes == null ? 0 : bytes.length)
+                .sum();
+
+        System.out.println("[Excel] 엑셀 사진 총 용량: " + (totalPhotoBytes / 1024 / 1024) + "MB");
 
         String fileName = safeFileName(site.getSite_name() + "_성능점검보고서.xlsx");
 
@@ -94,15 +137,15 @@ public class ExcelReportService {
                         URLEncoder.encode(fileName, StandardCharsets.UTF_8).replaceAll("\\+", "%20")
         );
 
+        long workbookStart = System.currentTimeMillis();
+
         try (Workbook wb = new XSSFWorkbook()) {
             Styles styles = createStyles(wb);
 
             createCoverSheet(wb, styles, site);
             createWorkSummarySheet(wb, styles, site);
-
-            // 여기부터 작성된 항목만 반영됨
             createTargetFacilitySheet(wb, styles, site, items, results);
-            createCategorySheets(wb, styles, items, results);
+            createCategorySheets(wb, styles, site, items, results, photosByResultId, excelPhotoBytesMap);
 
             for (int i = 0; i < wb.getNumberOfSheets(); i++) {
                 Sheet sheet = wb.getSheetAt(i);
@@ -115,28 +158,189 @@ public class ExcelReportService {
                 autoSizeSafe(sheet, 0, 6);
             }
 
+            System.out.println("[Excel] 엑셀 생성: " + (System.currentTimeMillis() - workbookStart) + "ms");
+
+            long writeStart = System.currentTimeMillis();
             wb.write(response.getOutputStream());
+            System.out.println("[Excel] 응답 쓰기: " + (System.currentTimeMillis() - writeStart) + "ms");
         }
+
+        System.out.println("[Excel] 전체 시간: " + (System.currentTimeMillis() - totalStart) + "ms");
+    }
+
+    private String makeResultGroupKey(InspectionResultEntity result) {
+        return safe(result.getCategoryGroup()) + "::" + (result.getSubItemId() == null ? 0 : result.getSubItemId());
+    }
+
+    private boolean isSeoulType(SiteDTO site) {
+        String name = safe(site.getSite_name());
+        return name.contains("서울형");
+    }
+
+    private Map<Long, byte[]> prepareExcelPhotoBytesMap(List<PhotoEntity> photos) {
+        if (photos == null || photos.isEmpty()) {
+            return new HashMap<>();
+        }
+
+        int threadCount = 2;
+
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        Map<Long, byte[]> resultMap = new ConcurrentHashMap<>();
+
+        try {
+            List<Future<?>> futures = new ArrayList<>();
+
+            for (PhotoEntity photo : photos) {
+                if (photo == null || photo.getId() == null) continue;
+                if (photo.getFileUrl() == null || photo.getFileUrl().isBlank()) continue;
+
+                futures.add(executor.submit(() -> {
+                    try {
+                        String s3Key = extractKeyFromUrl(photo.getFileUrl());
+
+                        GetObjectRequest req = GetObjectRequest.builder()
+                                .bucket(bucket)
+                                .key(s3Key)
+                                .build();
+
+                        try (InputStream is = s3Client.getObject(req)) {
+                            byte[] bytes = resizeImageKeepRatioForExcel(
+                                    is,
+                                    EXCEL_PHOTO_MAX_WIDTH,
+                                    EXCEL_PHOTO_MAX_HEIGHT,
+                                    EXCEL_PHOTO_QUALITY
+                            );
+
+                            resultMap.put(photo.getId(), bytes);
+                        }
+
+                    } catch (Exception e) {
+                        System.out.println("엑셀용 사진 준비 실패: " + photo.getFileUrl());
+                    }
+                }));
+            }
+
+            for (Future<?> future : futures) {
+                try {
+                    future.get();
+                } catch (Exception ignored) {
+                }
+            }
+
+        } finally {
+            executor.shutdown();
+        }
+
+        return resultMap;
+    }
+
+    private byte[] resizeImageKeepRatioForExcel(InputStream inputStream,
+                                                int maxWidth,
+                                                int maxHeight,
+                                                float quality) throws IOException {
+        BufferedImage original = ImageIO.read(inputStream);
+
+        if (original == null) {
+            throw new IOException("이미지 읽기 실패");
+        }
+
+        int originalWidth = original.getWidth();
+        int originalHeight = original.getHeight();
+
+        double scale = Math.min(
+                (double) maxWidth / originalWidth,
+                (double) maxHeight / originalHeight
+        );
+
+        if (scale > 1.0) {
+            scale = 1.0;
+        }
+
+        int newWidth = Math.max(1, (int) Math.round(originalWidth * scale));
+        int newHeight = Math.max(1, (int) Math.round(originalHeight * scale));
+
+        BufferedImage resized = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = resized.createGraphics();
+
+        g.setColor(java.awt.Color.WHITE);
+        g.fillRect(0, 0, newWidth, newHeight);
+
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+        g.drawImage(original, 0, 0, newWidth, newHeight, java.awt.Color.WHITE, null);
+        g.dispose();
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+
+        Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpg");
+        if (!writers.hasNext()) {
+            throw new IOException("JPG writer 없음");
+        }
+
+        ImageWriter writer = writers.next();
+        ImageWriteParam param = writer.getDefaultWriteParam();
+        param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+        param.setCompressionQuality(quality);
+
+        try (ImageOutputStream ios = ImageIO.createImageOutputStream(baos)) {
+            writer.setOutput(ios);
+            writer.write(null, new IIOImage(resized, null, null), param);
+        } finally {
+            writer.dispose();
+        }
+
+        return baos.toByteArray();
+    }
+
+    private String buildItemTitle(InspectionItemEntity item, InspectionResultEntity result) {
+        String baseTitle = item.getOrderNo() + ". " + safe(item.getContent());
+
+        if (result == null || result.getSubItemId() == null || result.getSubItemId() == 0) {
+            return baseTitle;
+        }
+
+        return inspectionSubItemRepo.findById(result.getSubItemId())
+                .map(sub -> baseTitle + "  " + safe(sub.getContent()))
+                .orElse(baseTitle);
     }
 
     private int createItemBlock(
             Sheet sheet,
             Workbook wb,
             Styles styles,
+            SiteDTO site,
             int startRow,
             InspectionItemEntity item,
             InspectionResultEntity result,
-            List<PhotoEntity> photos
+            List<PhotoEntity> photos,
+            Map<Long, byte[]> excelPhotoBytesMap
     ) {
-        String itemTitle = item.getOrderNo() + ". " + safe(item.getContent());
+        String itemTitle = buildItemTitle(item, result);
         String locationName = result == null ? "" : extractLocationName(result.getCategoryGroup());
         String resultValue = result == null ? "" : safe(result.getResult());
         String memo = result == null ? "" : safe(result.getMemo());
         String userMemo = extractUserMemo(memo);
 
-        mergeAndSet(sheet, startRow, startRow, 0, 8, itemTitle, styles.header);
-        sheet.getRow(startRow).setHeightInPoints(24);
-        startRow++;
+        boolean seoulType = isSeoulType(site);
+        int photoRowCount = seoulType ? SEOUL_PHOTO_ROW_COUNT : NORMAL_PHOTO_ROW_COUNT;
+        float photoRowHeight = seoulType ? SEOUL_PHOTO_ROW_HEIGHT : NORMAL_PHOTO_ROW_HEIGHT;
+
+        mergeAndSet(sheet, startRow, startRow + 1, 0, 8, itemTitle, styles.header);
+
+        Row titleRow = sheet.getRow(startRow);
+        if (titleRow != null) {
+            titleRow.setHeightInPoints(42);
+        }
+
+        Row titleRow2 = sheet.getRow(startRow + 1);
+        if (titleRow2 == null) {
+            titleRow2 = sheet.createRow(startRow + 1);
+        }
+        titleRow2.setHeightInPoints(42);
+
+        startRow += 2;
 
         Row row1 = sheet.createRow(startRow++);
         row1.setHeightInPoints(22);
@@ -186,21 +390,39 @@ public class ExcelReportService {
         int photoIndex = 0;
 
         while (photoIndex < photos.size()) {
-            for (int r = 0; r < 9; r++) {
+            for (int r = 0; r < photoRowCount; r++) {
                 Row imgRow = sheet.getRow(startRow + r);
                 if (imgRow == null) imgRow = sheet.createRow(startRow + r);
-                imgRow.setHeightInPoints(18);
+                imgRow.setHeightInPoints(photoRowHeight);
             }
 
-            insertPhoto(sheet, wb, photos.get(photoIndex), startRow, startRow + 8, 0, 4);
+            insertPhoto(
+                    sheet,
+                    wb,
+                    photos.get(photoIndex),
+                    startRow,
+                    startRow + photoRowCount - 1,
+                    0,
+                    4,
+                    excelPhotoBytesMap
+            );
             photoIndex++;
 
             if (photoIndex < photos.size()) {
-                insertPhoto(sheet, wb, photos.get(photoIndex), startRow, startRow + 8, 5, 9);
+                insertPhoto(
+                        sheet,
+                        wb,
+                        photos.get(photoIndex),
+                        startRow,
+                        startRow + photoRowCount - 1,
+                        5,
+                        9,
+                        excelPhotoBytesMap
+                );
                 photoIndex++;
             }
 
-            startRow += 10;
+            startRow += photoRowCount + 1;
         }
 
         startRow += 2;
@@ -561,17 +783,24 @@ public class ExcelReportService {
     private void createCategorySheets(
             Workbook wb,
             Styles styles,
+            SiteDTO site,
             List<InspectionItemEntity> items,
-            List<InspectionResultEntity> results
+            List<InspectionResultEntity> results,
+            Map<Long, List<PhotoEntity>> photosByResultId,
+            Map<Long, byte[]> excelPhotoBytesMap
     ) {
         Map<String, List<InspectionItemEntity>> grouped = new LinkedHashMap<>();
+
         for (InspectionItemEntity item : items) {
             grouped.computeIfAbsent(item.getCategory(), k -> new ArrayList<>()).add(item);
         }
 
         Map<Long, List<InspectionResultEntity>> resultsByItemId = new HashMap<>();
+
         for (InspectionResultEntity result : results) {
-            resultsByItemId.computeIfAbsent(result.getItemId(), k -> new ArrayList<>()).add(result);
+            resultsByItemId
+                    .computeIfAbsent(result.getItemId(), k -> new ArrayList<>())
+                    .add(result);
         }
 
         for (Map.Entry<String, List<InspectionItemEntity>> entry : grouped.entrySet()) {
@@ -579,7 +808,7 @@ public class ExcelReportService {
             List<InspectionItemEntity> categoryItems = entry.getValue();
 
             Sheet sheet = wb.createSheet(trimSheetName(category));
-            applyCategorySheetLayout(sheet);
+            applyCategorySheetLayout(sheet, site);
 
             int rowIdx = 0;
             boolean hasRenderedAnyBlock = false;
@@ -596,20 +825,43 @@ public class ExcelReportService {
                 }
 
                 Map<String, List<InspectionResultEntity>> byGroup = new LinkedHashMap<>();
+
                 for (InspectionResultEntity result : itemResults) {
-                    String key = safe(result.getCategoryGroup());
+                    String key = makeResultGroupKey(result);
                     byGroup.computeIfAbsent(key, k -> new ArrayList<>()).add(result);
                 }
 
                 for (Map.Entry<String, List<InspectionResultEntity>> groupEntry : byGroup.entrySet()) {
-                    InspectionResultEntity latest = groupEntry.getValue().get(groupEntry.getValue().size() - 1);
-                    List<PhotoEntity> photos = photoRepo.findByResultId(latest.getId());
+                    InspectionResultEntity latest = groupEntry.getValue()
+                            .stream()
+                            .max(Comparator.comparing(InspectionResultEntity::getId))
+                            .orElse(null);
+
+                    if (latest == null) {
+                        continue;
+                    }
+
+                    List<PhotoEntity> photos = photosByResultId.getOrDefault(
+                            latest.getId(),
+                            Collections.emptyList()
+                    );
 
                     if (!shouldRenderItemBlock(latest, photos)) {
                         continue;
                     }
 
-                    rowIdx = createItemBlock(sheet, wb, styles, rowIdx, item, latest, photos);
+                    rowIdx = createItemBlock(
+                            sheet,
+                            wb,
+                            styles,
+                            site,
+                            rowIdx,
+                            item,
+                            latest,
+                            photos,
+                            excelPhotoBytesMap
+                    );
+
                     hasRenderedAnyBlock = true;
                 }
             }
@@ -620,18 +872,22 @@ public class ExcelReportService {
         }
     }
 
-    private void applyCategorySheetLayout(Sheet sheet) {
-        sheet.setColumnWidth(0, 2600);
-        sheet.setColumnWidth(1, 2600);
-        sheet.setColumnWidth(2, 2600);
-        sheet.setColumnWidth(3, 2600);
+    private void applyCategorySheetLayout(Sheet sheet, SiteDTO site) {
+        int photoColWidth = isSeoulType(site)
+                ? SEOUL_PHOTO_COL_WIDTH
+                : NORMAL_PHOTO_COL_WIDTH;
 
-        sheet.setColumnWidth(4, 1800);
+        sheet.setColumnWidth(0, photoColWidth);
+        sheet.setColumnWidth(1, photoColWidth);
+        sheet.setColumnWidth(2, photoColWidth);
+        sheet.setColumnWidth(3, photoColWidth);
 
-        sheet.setColumnWidth(5, 2600);
-        sheet.setColumnWidth(6, 2600);
-        sheet.setColumnWidth(7, 2600);
-        sheet.setColumnWidth(8, 2600);
+        sheet.setColumnWidth(4, 900);
+
+        sheet.setColumnWidth(5, photoColWidth);
+        sheet.setColumnWidth(6, photoColWidth);
+        sheet.setColumnWidth(7, photoColWidth);
+        sheet.setColumnWidth(8, photoColWidth);
 
         sheet.setDisplayGridlines(false);
         sheet.setFitToPage(true);
@@ -825,24 +1081,26 @@ public class ExcelReportService {
         return "";
     }
 
-    private void insertPhoto(Sheet sheet, Workbook wb, PhotoEntity photo,
-                             int row1, int row2, int col1, int col2) {
+    private void insertPhoto(Sheet sheet,
+                             Workbook wb,
+                             PhotoEntity photo,
+                             int row1,
+                             int row2,
+                             int col1,
+                             int col2,
+                             Map<Long, byte[]> excelPhotoBytesMap) {
         try {
-            String fileUrl = photo.getFileUrl();
-            String s3Key = extractKeyFromUrl(fileUrl);
-
-            GetObjectRequest req = GetObjectRequest.builder()
-                    .bucket(bucket)
-                    .key(s3Key)
-                    .build();
-
-            byte[] resizedBytes;
-
-            try (InputStream is = s3Client.getObject(req)) {
-                resizedBytes = resizeImageToRatioForExcel(is, 1200, 900, 0.72f);
+            if (photo == null || photo.getId() == null) {
+                return;
             }
 
-            int pictureIdx = wb.addPicture(resizedBytes, Workbook.PICTURE_TYPE_JPEG);
+            byte[] imageBytes = excelPhotoBytesMap.get(photo.getId());
+
+            if (imageBytes == null || imageBytes.length == 0) {
+                return;
+            }
+
+            int pictureIdx = wb.addPicture(imageBytes, Workbook.PICTURE_TYPE_JPEG);
             Drawing<?> drawing = sheet.createDrawingPatriarch();
 
             XSSFClientAnchor anchor = new XSSFClientAnchor(
@@ -855,92 +1113,8 @@ public class ExcelReportService {
             drawing.createPicture(anchor, pictureIdx);
 
         } catch (Exception e) {
-            System.out.println("엑셀 사진 삽입 실패: " + photo.getFileUrl());
-            e.printStackTrace();
+            System.out.println("엑셀 사진 삽입 실패: " + (photo == null ? "" : photo.getFileUrl()));
         }
-    }
-
-    private byte[] resizeImageToRatioForExcel(InputStream inputStream,
-                                              int targetWidth,
-                                              int targetHeight,
-                                              float quality) throws IOException {
-        BufferedImage original = ImageIO.read(inputStream);
-
-        if (original == null) {
-            throw new IOException("이미지 읽기 실패");
-        }
-
-        int originalWidth = original.getWidth();
-        int originalHeight = original.getHeight();
-
-        double targetRatio = (double) targetWidth / targetHeight;
-        double originalRatio = (double) originalWidth / originalHeight;
-
-        int cropWidth = originalWidth;
-        int cropHeight = originalHeight;
-        int cropX = 0;
-        int cropY = 0;
-
-        if (originalRatio > targetRatio) {
-            cropWidth = (int) (originalHeight * targetRatio);
-            cropX = (originalWidth - cropWidth) / 2;
-        } else if (originalRatio < targetRatio) {
-            cropHeight = (int) (originalWidth / targetRatio);
-            cropY = (originalHeight - cropHeight) / 2;
-        }
-
-        BufferedImage cropped = original.getSubimage(cropX, cropY, cropWidth, cropHeight);
-
-        BufferedImage resized = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = resized.createGraphics();
-
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-
-        g.drawImage(cropped, 0, 0, targetWidth, targetHeight, java.awt.Color.WHITE, null);
-        g.dispose();
-
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-
-        Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpg");
-        ImageWriter writer = writers.next();
-
-        ImageWriteParam param = writer.getDefaultWriteParam();
-        param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
-        param.setCompressionQuality(quality);
-
-        try (ImageOutputStream ios = ImageIO.createImageOutputStream(baos)) {
-            writer.setOutput(ios);
-            writer.write(null, new IIOImage(resized, null, null), param);
-        } finally {
-            writer.dispose();
-        }
-
-        return baos.toByteArray();
-    }
-
-
-    private double mmToPxWidth(double mm) {
-        return (mm / 25.4 * 96.0) * 0.9005;
-    }
-
-    private double mmToPxHeight(double mm) {
-        return mm / 25.4 * 96.0;
-    }
-
-    private double getColumnWidthPx(Sheet sheet, int colIndex) {
-        int widthUnits = sheet.getColumnWidth(colIndex);
-        return widthUnits / 256.0 * 7.0;
-    }
-
-    private double getRowHeightPx(Sheet sheet, int rowIndex) {
-        Row row = sheet.getRow(rowIndex);
-        float heightPoints = (row != null)
-                ? row.getHeightInPoints()
-                : sheet.getDefaultRowHeightInPoints();
-
-        return heightPoints * 96.0 / 72.0;
     }
 
     private void createKeyValueRow(Sheet sheet, int rowIndex, Styles styles,
@@ -1069,6 +1243,7 @@ public class ExcelReportService {
         s.note = createBorderStyle(wb, normalFont, IndexedColors.WHITE.getIndex(), HorizontalAlignment.LEFT);
         s.normalCenter = createBorderStyle(wb, normalFont, IndexedColors.WHITE.getIndex(), HorizontalAlignment.CENTER);
 
+        s.header.setWrapText(true);
         s.value.setWrapText(true);
         s.tableCell.setWrapText(true);
         s.tableCellCenter.setWrapText(true);

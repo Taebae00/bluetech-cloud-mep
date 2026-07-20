@@ -66,10 +66,7 @@ async function updatePendingSyncBadge() {
     const syncBtn = document.querySelector(".sync-btn");
     if (!syncBtn) return;
 
-    const results = (await OfflineDB.getAll("draft_results"))
-        .filter(x => x.siteId === siteId && x.syncStatus === "pending");
-
-    const totalCount = results.length;
+    const totalCount = await getPendingCountBySiteId(siteId);
 
     syncBtn.textContent = totalCount > 0 ? `동기화 (${totalCount})` : "동기화";
 }
@@ -125,8 +122,27 @@ async function toggleCategory(button) {
     }
 }
 
-function makeDraftKey(siteId, itemId, categoryGroup) {
-    return `${siteId}_${itemId}_${categoryGroup}`;
+function makeDraftKey(siteId, itemId, categoryGroup, subItemId = 0) {
+    return `${siteId}_${itemId}_${categoryGroup}_${subItemId || 0}`;
+}
+
+function getSubItemIdFromButton(button) {
+    return button?.dataset?.subItemId || 0;
+}
+
+function getSaveBtnForTarget(element) {
+    const subBox = element.closest(".seoul-sub-item-box");
+
+    if (subBox) {
+        return subBox.querySelector(".inline-save-btn");
+    }
+
+    const editor = element.closest(".item-editor");
+    return editor?.querySelector(".inline-save-btn");
+}
+
+function getTargetBoxForSaveButton(saveBtn) {
+    return saveBtn.closest(".seoul-sub-item-box") || saveBtn.closest(".item-editor");
 }
 
 function getCurrentOpenItemCard() {
@@ -151,62 +167,108 @@ function getPhotoCountFromEditor(editor) {
     }).length;
 }
 
+function getTargetCurrentResult(targetBox) {
+    const memo = getMemoInputForSave(targetBox)?.value.trim() || "";
+    const visibleMemo = getVisibleMemoInput(targetBox)?.value.trim() || "";
+
+    const hasPhoto = Array.from(targetBox.querySelectorAll(".photo-slot")).some(slot =>
+        !!slot.dataset.savedPhotoId ||
+        !!slot.dataset.localPhotoKey ||
+        slot.classList.contains("filled")
+    );
+
+    return (memo !== "" || visibleMemo !== "" || hasPhoto) ? "작성" : "미작성";
+}
+
+function refreshOneItemCardState(itemCard) {
+    if (!itemCard) return;
+
+    const editor = itemCard.querySelector(".item-editor");
+    if (!editor) return;
+
+    const targetBoxes = editor.querySelectorAll(".seoul-sub-item-box").length > 0
+        ? Array.from(editor.querySelectorAll(".seoul-sub-item-box"))
+        : [editor];
+
+    let hasWritten = false;
+    let hasNA = false;
+
+    targetBoxes.forEach(targetBox => {
+        const result = targetBox.dataset.currentResult || getTargetCurrentResult(targetBox);
+
+        if (result === "해당사항없음") hasNA = true;
+        if (result === "작성") hasWritten = true;
+    });
+
+    if (hasNA) {
+        itemCard.dataset.currentResult = "해당사항없음";
+    } else if (hasWritten) {
+        itemCard.dataset.currentResult = "작성";
+    } else {
+        itemCard.dataset.currentResult = "미작성";
+    }
+
+    const row = itemCard.querySelector(".item-row");
+    if (row) {
+        if (itemCard.dataset.currentResult === "작성" || itemCard.dataset.currentResult === "해당사항없음") {
+            row.classList.add("done");
+        } else {
+            row.classList.remove("done");
+        }
+    }
+
+    syncStatusButton(itemCard);
+
+    const locationBox = itemCard.closest(".location-box");
+    if (locationBox) updateLocationProgress(locationBox);
+
+    recalcSiteProgress();
+}
+
 async function hasUnsavedChanges(itemCard) {
     if (!itemCard) return false;
 
-    const siteId = $("#siteId").val();
-    const saveBtn = itemCard.querySelector(".inline-save-btn");
     const editor = itemCard.querySelector(".item-editor");
-    if (!saveBtn || !editor) return false;
+    if (!editor) return false;
 
-    const itemId = saveBtn.dataset.itemId;
-    const categoryGroup = saveBtn.dataset.categoryGroup;
-    const draftKey = makeDraftKey(siteId, itemId, categoryGroup);
+    const targetBoxes = editor.querySelectorAll(".seoul-sub-item-box").length > 0
+        ? Array.from(editor.querySelectorAll(".seoul-sub-item-box"))
+        : [editor];
 
-    mergeSpecialVisibleMemo(editor);
-    const currentMemo = getMemoInputForSave(editor)?.value.trim() || "";
-    const currentPhotoCount = getPhotoCountFromEditor(editor);
-    const currentResult = itemCard.dataset.currentResult || "미작성";
+    for (const targetBox of targetBoxes) {
+        const saveBtn = targetBox.querySelector(".inline-save-btn");
+        if (!saveBtn) continue;
 
-    let serverRes = {
-        memo: "",
-        result: "미작성",
-        photos: []
-    };
+        const { draftKey } = getDraftInfoFromSaveBtn(saveBtn);
 
-    try {
-        serverRes = await $.ajax({
-            type: "GET",
-            url: "/inspection/detail",
-            data: { siteId, itemId, categoryGroup }
-        });
-    } catch (e) {
-        console.warn("오프라인 상태라 서버 변경사항 조회 생략", e);
+        buildSpecialSheetMemoIfNeeded(targetBox);
+
+        const currentMemo = getMemoInputForSave(targetBox)?.value.trim() || "";
+        const currentResult = getTargetCurrentResult(targetBox);
+
+        const localDraft = await OfflineDB.get("draft_results", draftKey);
+
+        if (!localDraft) {
+            const hasCurrentValue =
+                currentMemo !== "" ||
+                currentResult === "작성" ||
+                currentResult === "해당사항없음";
+
+            return hasCurrentValue;
+        }
+
+        const savedMemo = localDraft.memo || "";
+        const savedResult = localDraft.result || "미작성";
+
+        if (
+            currentMemo !== savedMemo ||
+            currentResult !== savedResult
+        ) {
+            return true;
+        }
     }
 
-    const localDraft = await OfflineDB.get("draft_results", draftKey);
-    const allLocalPhotos = await OfflineDB.getAll("draft_photos");
-
-    const localPhotos = allLocalPhotos.filter(photo =>
-        photo.draftKey === draftKey && photo.isDeleted !== true
-    );
-
-    const deletedServerPhotoIds = allLocalPhotos
-        .filter(photo => photo.isDeleted === true && photo.serverPhotoId)
-        .map(photo => Number(photo.serverPhotoId));
-
-    const serverPhotos = (serverRes.photos || [])
-        .filter(photo => !deletedServerPhotoIds.includes(Number(photo.id)));
-
-    const mergedSavedPhotoCount = serverPhotos.length + localPhotos.length;
-    const savedMemo = localDraft ? (localDraft.memo || "") : (serverRes.memo || "");
-    const savedResult = localDraft ? (localDraft.result || "미작성") : (serverRes.result || "미작성");
-
-    const memoChanged = currentMemo !== savedMemo;
-    const photoChanged = currentPhotoCount !== mergedSavedPhotoCount;
-    const resultChanged = currentResult !== savedResult;
-
-    return memoChanged || photoChanged || resultChanged;
+    return false;
 }
 
 async function openItemEditor(button) {
@@ -235,12 +297,10 @@ async function saveInlineInspection(button, options = {}) {
     const { silent = false } = options;
     if (button.dataset.saving === "true") return false;
 
-    const siteId = $("#siteId").val();
-    const itemId = button.dataset.itemId;
-    const categoryGroup = button.dataset.categoryGroup;
-    const editor = button.closest(".item-editor");
+    const { siteId, itemId, categoryGroup, subItemId, draftKey } = getDraftInfoFromSaveBtn(button);
+    const editor = getTargetBoxForSaveButton(button);
 
-    mergeSpecialVisibleMemo(editor);
+    buildSpecialSheetMemoIfNeeded(editor);
 
     const memoInput = getMemoInputForSave(editor);
     const memo = memoInput?.value.trim() || "";
@@ -249,9 +309,7 @@ async function saveInlineInspection(button, options = {}) {
     const visibleMemo = visibleMemoInput?.value.trim() || "";
 
     const itemCard = button.closest(".item-card");
-    const itemRow = itemCard.querySelector(".item-row");
-    const currentResult = itemCard.dataset.currentResult || "미작성";
-    const draftKey = makeDraftKey(siteId, itemId, categoryGroup);
+    const currentResult = getTargetCurrentResult(editor);
 
     const originalText = button.textContent;
     button.dataset.saving = "true";
@@ -278,6 +336,7 @@ async function saveInlineInspection(button, options = {}) {
             draftKey,
             siteId: Number(siteId),
             itemId: Number(itemId),
+            subItemId: Number(subItemId || 0),
             categoryGroup,
             result: finalResult,
             memo,
@@ -285,21 +344,12 @@ async function saveInlineInspection(button, options = {}) {
             syncStatus: "pending"
         }, "draftKey");
 
-        itemCard.dataset.currentResult = finalResult;
+        editor.dataset.currentResult = finalResult;
 
-        if (finalResult === "작성" || finalResult === "해당사항없음") {
-            itemRow?.classList.add("done");
-        } else {
-            itemRow?.classList.remove("done");
+        if (itemCard) {
+            refreshOneItemCardState(itemCard);
         }
 
-        syncStatusButton(itemCard);
-
-        const locationBox = itemCard.closest(".location-box");
-        if (locationBox) updateLocationProgress(locationBox);
-
-        recalcSiteProgress();
-        await refreshVisibleItemStates();
         await updatePendingSyncBadge();
 
         if (!silent) {
@@ -403,42 +453,95 @@ async function refreshVisibleItemStates() {
     const allDrafts = await OfflineDB.getAll("draft_results");
     const allPhotos = await OfflineDB.getAll("draft_photos");
 
+    const draftMap = new Map();
+    allDrafts.forEach(d => {
+        draftMap.set(d.draftKey, d);
+    });
+
+    const photoCountMap = new Map();
+    allPhotos.forEach(p => {
+        if (p.isDeleted === true) return;
+        if (!p.draftKey) return;
+
+        photoCountMap.set(
+            p.draftKey,
+            (photoCountMap.get(p.draftKey) || 0) + 1
+        );
+    });
+
     document.querySelectorAll(".item-card").forEach(itemCard => {
-        const saveBtn = itemCard.querySelector(".inline-save-btn");
-        if (!saveBtn) return;
+        const editor = itemCard.querySelector(".item-editor");
+        if (!editor) return;
 
-        const itemId = saveBtn.dataset.itemId;
-        const categoryGroup = saveBtn.dataset.categoryGroup;
-        const draftKey = makeDraftKey(siteId, itemId, categoryGroup);
+        const targetBoxes = editor.querySelectorAll(".seoul-sub-item-box").length > 0
+            ? Array.from(editor.querySelectorAll(".seoul-sub-item-box"))
+            : [editor];
 
-        const draft = allDrafts.find(x => x.draftKey === draftKey);
-        const localPhotos = allPhotos.filter(x => x.draftKey === draftKey && x.isDeleted !== true);
+        let hasWritten = false;
+        let hasNA = false;
+        let hasAnyLocalOrDom = false;
 
-        const row = itemCard.querySelector(".item-row");
+        for (const targetBox of targetBoxes) {
+            const saveBtn = targetBox.querySelector(".inline-save-btn");
+            if (!saveBtn) continue;
 
-        // 로컬 변경이 전혀 없으면 서버가 렌더한 현재 상태를 유지
-        if (!draft && localPhotos.length === 0) {
+            const { draftKey } = getDraftInfoFromSaveBtn(saveBtn);
+
+            const draft = draftMap.get(draftKey);
+            const localPhotoCount = photoCountMap.get(draftKey) || 0;
+
+            const domHasPhoto = Array.from(targetBox.querySelectorAll(".photo-slot")).some(slot =>
+                !!slot.dataset.savedPhotoId ||
+                !!slot.dataset.localPhotoKey ||
+                slot.classList.contains("filled")
+            );
+
+            const memoInput = getMemoInputForSave(targetBox);
+            const domMemo = memoInput?.value?.trim() || "";
+
+            const draftHasValue =
+                draft &&
+                (
+                    draft.result === "작성" ||
+                    draft.result === "해당사항없음" ||
+                    (draft.memo || "").trim() !== ""
+                );
+
+            if (draftHasValue || localPhotoCount > 0 || domHasPhoto || domMemo !== "") {
+                hasAnyLocalOrDom = true;
+            }
+
+            const memoValue = draft ? (draft.memo || "") : domMemo;
+
+            if (draft?.result === "해당사항없음") {
+                hasNA = true;
+            }
+
+            if (
+                draft?.result === "작성" ||
+                memoValue.trim() !== "" ||
+                localPhotoCount > 0 ||
+                domHasPhoto
+            ) {
+                hasWritten = true;
+            }
+        }
+
+        // 중요: 로컬/DOM 근거가 하나도 없으면 서버에서 내려온 기존 상태를 건드리지 않음
+        if (!hasAnyLocalOrDom) {
             syncStatusButton(itemCard);
             return;
         }
 
-        const editor = itemCard.querySelector(".item-editor");
-        const memoInput = editor?.querySelector(".inline-memo");
-        const memoValue = draft ? (draft.memo || "") : (memoInput?.value?.trim() || "");
-
-        const hasPhoto = localPhotos.length > 0 ||
-            Array.from(itemCard.querySelectorAll(".photo-slot")).some(slot =>
-                !!slot.dataset.savedPhotoId || !!slot.dataset.localPhotoKey || slot.classList.contains("filled")
-            );
-
-        if (draft?.result === "해당사항없음") {
+        if (hasNA) {
             itemCard.dataset.currentResult = "해당사항없음";
-        } else if (memoValue !== "" || hasPhoto) {
+        } else if (hasWritten) {
             itemCard.dataset.currentResult = "작성";
         } else {
             itemCard.dataset.currentResult = "미작성";
         }
 
+        const row = itemCard.querySelector(".item-row");
         if (row) {
             if (itemCard.dataset.currentResult === "작성" || itemCard.dataset.currentResult === "해당사항없음") {
                 row.classList.add("done");
@@ -678,9 +781,6 @@ async function deleteLocation(button) {
 function bindInlinePhotoSlot(slot) {
     const cameraInput = slot.querySelector(".inline-photo-input");
     const galleryInput = slot.querySelector(".inline-gallery-input");
-    const img = slot.querySelector(".photo-slot-img");
-    const text = slot.querySelector(".photo-slot-text");
-    const delBtn = slot.querySelector(".photo-delete-btn");
 
     let badge = slot.querySelector(".photo-save-badge");
     if (!badge) {
@@ -695,8 +795,7 @@ function bindInlinePhotoSlot(slot) {
         const file = input.files && input.files[0];
         if (!file) return;
 
-        const editor = slot.closest(".item-editor");
-        const saveBtn = editor?.querySelector(".inline-save-btn");
+        const saveBtn = getSaveBtnForTarget(slot);
 
         if (!saveBtn) {
             alert("저장 대상 항목을 찾지 못했습니다.");
@@ -704,95 +803,12 @@ function bindInlinePhotoSlot(slot) {
             return;
         }
 
-        const siteId = $("#siteId").val();
-        const itemId = saveBtn.dataset.itemId;
-        const categoryGroup = saveBtn.dataset.categoryGroup;
-        const draftKey = makeDraftKey(siteId, itemId, categoryGroup);
+        input.value = "";
 
-        try {
-            markPhotoSlotPending(slot);
+        if (cameraInput && cameraInput !== input) cameraInput.value = "";
+        if (galleryInput && galleryInput !== input) galleryInput.value = "";
 
-            const savedPhotoId = slot.dataset.savedPhotoId;
-
-            if (savedPhotoId) {
-                await OfflineDB.putAndVerify("draft_photos", {
-                    photoKey: `delete_${savedPhotoId}`,
-                    serverPhotoId: Number(savedPhotoId),
-                    isDeleted: true,
-                    syncStatus: "pending",
-                    createdAt: new Date().toISOString()
-                }, "photoKey");
-            }
-
-            if (slot.dataset.localPhotoKey) {
-                await OfflineDB.deleteByKey("draft_photos", slot.dataset.localPhotoKey);
-                delete slot.dataset.localPhotoKey;
-            }
-
-            const photoKey = generateUUID();
-
-            await OfflineDB.putAndVerify("draft_photos", {
-                photoKey,
-                draftKey,
-                fileBlob: file,
-                fileName: file.name || "photo.jpg",
-                isDeleted: false,
-                syncStatus: "pending",
-                createdAt: new Date().toISOString()
-            }, "photoKey");
-
-            slot.dataset.localPhotoKey = photoKey;
-            delete slot.dataset.savedPhotoId;
-
-            const previewUrl = URL.createObjectURL(file);
-
-            if (img.dataset.objectUrl) {
-                URL.revokeObjectURL(img.dataset.objectUrl);
-            }
-
-            img.dataset.objectUrl = previewUrl;
-            img.src = previewUrl;
-            img.style.display = "block";
-
-            if (text) text.style.display = "none";
-            if (delBtn) delBtn.style.display = "flex";
-
-            slot.classList.remove("empty");
-            slot.classList.add("filled");
-
-            input.value = "";
-            if (cameraInput && cameraInput !== input) cameraInput.value = "";
-            if (galleryInput && galleryInput !== input) galleryInput.value = "";
-
-            const saved = await saveInlineInspection(saveBtn, {
-                silent: true,
-                keepOpen: true
-            });
-
-            if (!saved) {
-                throw new Error("점검 결과 로컬 저장 실패");
-            }
-
-            markPhotoSlotSaved(slot);
-
-            const itemCard = saveBtn.closest(".item-card");
-            if (itemCard) {
-                itemCard.dataset.currentResult = "작성";
-                itemCard.querySelector(".item-row")?.classList.add("done");
-                syncStatusButton(itemCard);
-
-                const locationBox = itemCard.closest(".location-box");
-                if (locationBox) updateLocationProgress(locationBox);
-            }
-
-            recalcSiteProgress();
-            await updatePendingSyncBadge();
-
-        } catch (e) {
-            console.error(e);
-            markPhotoSlotFailed(slot);
-            alert("사진 로컬 저장 실패");
-        }
+        await savePhotoFileToSlot(file, slot, saveBtn);
     }
 
     if (cameraInput) {
@@ -819,6 +835,8 @@ async function removeInlinePhoto(event, button) {
     if (button.dataset.deleting === "true") return;
 
     const slot = button.closest(".photo-slot");
+    const saveBtn = getSaveBtnForTarget(slot);
+
     const localPhotoKey = slot.dataset.localPhotoKey;
     const savedPhotoId = slot.dataset.savedPhotoId;
 
@@ -831,26 +849,52 @@ async function removeInlinePhoto(event, button) {
         if (localPhotoKey) {
             await OfflineDB.deleteByKey("draft_photos", localPhotoKey);
             clearInlineSlot(slot);
+
+            if (saveBtn) {
+                await saveInlineInspection(saveBtn, { silent: true });
+            }
+
             await updatePendingSyncBadge();
             alert("사진이 삭제되었습니다.");
             return;
         }
 
         if (savedPhotoId) {
-            await OfflineDB.put("draft_photos", {
+            if (!saveBtn) {
+                alert("저장 대상 항목을 찾지 못했습니다.");
+                return;
+            }
+
+            const { siteId, itemId, categoryGroup, subItemId, draftKey } = getDraftInfoFromSaveBtn(saveBtn);
+
+            await OfflineDB.putAndVerify("draft_photos", {
                 photoKey: `delete_${savedPhotoId}`,
+                siteId: Number(siteId),
+                itemId: Number(itemId),
+                subItemId: Number(subItemId || 0),
+                categoryGroup,
+                draftKey,
                 serverPhotoId: Number(savedPhotoId),
                 isDeleted: true,
                 syncStatus: "pending",
                 createdAt: new Date().toISOString()
-            });
+            }, "photoKey");
+
             clearInlineSlot(slot);
+
+            await saveInlineInspection(saveBtn, { silent: true });
             await updatePendingSyncBadge();
+
             alert("사진이 삭제 예약되었습니다. 동기화 시 서버에서도 삭제됩니다.");
             return;
         }
 
         clearInlineSlot(slot);
+
+        if (saveBtn) {
+            await saveInlineInspection(saveBtn, { silent: true });
+        }
+
         alert("사진이 삭제되었습니다.");
     } catch (e) {
         console.error(e);
@@ -860,6 +904,26 @@ async function removeInlinePhoto(event, button) {
         button.disabled = false;
         button.textContent = originalText;
     }
+}
+
+function ensurePhotoSlots(grid, count) {
+    const slots = Array.from(grid.querySelectorAll(".photo-slot"));
+
+    while (slots.length < Math.max(2, count)) {
+        const div = createPhotoSlot();
+        grid.appendChild(div);
+        bindInlinePhotoSlot(div);
+        slots.push(div);
+    }
+
+    return slots;
+}
+
+function getPhotoSlotIndex(slot) {
+    const targetBox = slot.closest(".seoul-sub-item-box") || slot.closest(".item-editor");
+    if (!targetBox) return 0;
+
+    return Array.from(targetBox.querySelectorAll(".photo-slot")).indexOf(slot);
 }
 
 function clearInlineSlot(slot) {
@@ -886,14 +950,12 @@ function clearInlineSlot(slot) {
     if (delBtn) delBtn.style.display = "none";
 
     const badge = slot.querySelector(".photo-save-badge");
-
     if (badge) {
         badge.textContent = "미저장";
         badge.style.display = "none";
     }
 
     slot.classList.remove("local-saved", "local-pending");
-
     slot.classList.add("empty");
     slot.classList.remove("filled");
 
@@ -901,31 +963,23 @@ function clearInlineSlot(slot) {
     delete slot.dataset.localPhotoKey;
 }
 
-
-function ensurePhotoSlots(grid, count) {
-    const slots = Array.from(grid.querySelectorAll(".photo-slot"));
-
-    while (slots.length < Math.max(2, count)) {
-        const div = createPhotoSlot();
-        grid.appendChild(div);
-        bindInlinePhotoSlot(div);
-        slots.push(div);
-    }
-
-    return slots;
-}
-
 function renderAllPhotos(editor, photoItems) {
     const grid = editor.querySelector(".editor-photo-grid");
     if (!grid) return;
 
-    const list = photoItems || [];
-    const slots = ensurePhotoSlots(grid, list.length);
+    const list = (photoItems || []).slice(0, 6);
+    const slots = ensurePhotoSlots(grid, 6);
 
     slots.forEach(slot => clearInlineSlot(slot));
 
-    list.forEach((photo, index) => {
+    list.forEach((photo, fallbackIndex) => {
+        const index = Number.isFinite(Number(photo.slotIndex))
+            ? Number(photo.slotIndex)
+            : fallbackIndex;
+
         const slot = slots[index];
+        if (!slot) return;
+
         const img = slot.querySelector(".photo-slot-img");
         const text = slot.querySelector(".photo-slot-text");
         const delBtn = slot.querySelector(".photo-delete-btn");
@@ -933,18 +987,23 @@ function renderAllPhotos(editor, photoItems) {
         let src = "";
 
         if (photo.type === "local") {
+            if (!photo.fileBlob) return;
+
             src = URL.createObjectURL(photo.fileBlob);
             img.dataset.objectUrl = src;
             slot.dataset.localPhotoKey = photo.photoKey;
         } else {
             src = photo.fileUrl || "";
+            if (!src) return;
+
             slot.dataset.savedPhotoId = photo.id;
         }
 
         img.src = src;
         img.style.display = "block";
-        text.style.display = "none";
-        delBtn.style.display = "flex";
+
+        if (text) text.style.display = "none";
+        if (delBtn) delBtn.style.display = "flex";
 
         slot.classList.remove("empty");
         slot.classList.add("filled");
@@ -953,22 +1012,28 @@ function renderAllPhotos(editor, photoItems) {
     });
 }
 
-function addInlinePhotoSlot(button) {
-    const editor = button.closest(".item-editor");
-    const grid = editor.querySelector(".editor-photo-grid");
+async function loadInlineInspectionData(button, editor) {
+    const seoulBoxes = editor.querySelectorAll(".seoul-sub-item-box");
 
-    const div = createPhotoSlot();
-    grid.appendChild(div);
-    bindInlinePhotoSlot(div);
+    if (seoulBoxes.length > 0) {
+        for (const box of seoulBoxes) {
+            const fakeBtn = box.querySelector(".inline-save-btn");
+            if (!fakeBtn) continue;
+
+            await loadSingleInspectionData(fakeBtn, box);
+        }
+        return;
+    }
+
+    await loadSingleInspectionData(button, editor);
 }
 
-async function loadInlineInspectionData(button, editor) {
-    const siteId = $("#siteId").val();
-    const itemId = button.dataset.itemId;
-    const categoryGroup = button.dataset.categoryGroup;
-    const draftKey = makeDraftKey(siteId, itemId, categoryGroup);
-
+async function loadSingleInspectionData(button, editor) {
+    const { siteId, itemId, categoryGroup, subItemId, draftKey } = getDraftInfoFromSaveBtn(button);
     const itemCard = button.closest(".item-card");
+
+    const loadToken = generateUUID();
+    editor.dataset.loadToken = loadToken;
 
     let serverRes = {
         memo: "",
@@ -980,10 +1045,14 @@ async function loadInlineInspectionData(button, editor) {
         serverRes = await $.ajax({
             type: "GET",
             url: "/inspection/detail",
-            data: { siteId, itemId, categoryGroup }
+            data: { siteId, itemId, categoryGroup, subItemId }
         });
     } catch (e) {
         console.warn("오프라인 또는 서버 조회 실패. 로컬 데이터로만 표시합니다.", e);
+    }
+
+    if (editor.dataset.loadToken !== loadToken) {
+        return;
     }
 
     try {
@@ -992,29 +1061,40 @@ async function loadInlineInspectionData(button, editor) {
 
         const localPhotos = allLocalPhotos.filter(photo =>
             photo.draftKey === draftKey &&
-            photo.isDeleted !== true
+            photo.isDeleted !== true &&
+            photo.fileBlob
         );
 
         const deletedServerPhotoIds = allLocalPhotos
-            .filter(photo => photo.isDeleted === true && photo.serverPhotoId)
+            .filter(photo =>
+                photo.isDeleted === true &&
+                photo.serverPhotoId &&
+                photo.draftKey === draftKey
+            )
             .map(photo => Number(photo.serverPhotoId));
 
         const serverPhotos = (serverRes.photos || [])
             .filter(photo => !deletedServerPhotoIds.includes(Number(photo.id)));
 
         const mergedPhotos = [
-            ...serverPhotos.map(photo => ({
+            ...serverPhotos.map((photo, index) => ({
                 type: "server",
                 id: photo.id,
+                slotIndex: Number.isFinite(Number(photo.slotIndex))
+                    ? Number(photo.slotIndex)
+                    : index,
                 fileUrl: photo.fileUrl || photo.file_url || photo.url || ""
             })),
-            ...localPhotos.map(photo => ({
+            ...localPhotos.map((photo, index) => ({
                 type: "local",
                 photoKey: photo.photoKey,
+                slotIndex: Number.isFinite(Number(photo.slotIndex))
+                    ? Number(photo.slotIndex)
+                    : index,
                 fileBlob: photo.fileBlob,
                 fileName: photo.fileName
             }))
-        ];
+        ].slice(0, 6);
 
         const finalMemo = localDraft ? (localDraft.memo || "") : (serverRes.memo || "");
         const finalResult = localDraft ? (localDraft.result || "미작성") : (serverRes.result || "미작성");
@@ -1044,23 +1124,14 @@ async function loadInlineInspectionData(button, editor) {
         const hasMemo = !!(finalMemo && finalMemo.trim() !== "");
 
         if (finalResult === "해당사항없음") {
-            itemCard.dataset.currentResult = "해당사항없음";
+            editor.dataset.currentResult = "해당사항없음";
         } else if (hasMemo || hasPhoto || finalResult === "작성") {
-            itemCard.dataset.currentResult = "작성";
+            editor.dataset.currentResult = "작성";
         } else {
-            itemCard.dataset.currentResult = "미작성";
+            editor.dataset.currentResult = "미작성";
         }
 
-        const row = itemCard.querySelector(".item-row");
-        if (row) {
-            if (itemCard.dataset.currentResult === "작성" || itemCard.dataset.currentResult === "해당사항없음") {
-                row.classList.add("done");
-            } else {
-                row.classList.remove("done");
-            }
-        }
-
-        syncStatusButton(itemCard);
+        refreshOneItemCardState(itemCard);
 
     } catch (e) {
         console.error(e);
@@ -1069,26 +1140,10 @@ async function loadInlineInspectionData(button, editor) {
 }
 
 
-document.addEventListener("DOMContentLoaded", function () {
+document.addEventListener("DOMContentLoaded", async function () {
     document.querySelectorAll(".item-editor").forEach(bindMemoAutoWrite);
     document.querySelectorAll(".photo-slot").forEach(bindInlinePhotoSlot);
     document.querySelectorAll(".item-card").forEach(syncStatusButton);
-
-    document.querySelectorAll(".status-direct-wrap .item-card").forEach(card => {
-
-        const editor = card.querySelector(".item-editor");
-
-        const fakeBtn = {
-            dataset: {
-                itemId: card.querySelector(".inline-save-btn").dataset.itemId,
-                categoryGroup: card.querySelector(".inline-save-btn").dataset.categoryGroup
-            },
-            closest: () => card
-        };
-
-        loadInlineInspectionData(fakeBtn, editor);
-    });
-
 
     const logoutBtn = document.getElementById("logoutBtn");
     if (logoutBtn) {
@@ -1130,7 +1185,7 @@ document.addEventListener("DOMContentLoaded", function () {
             $.ajax({
                 type: "POST",
                 url: "/site/delete",
-                data: {siteId},
+                data: { siteId },
                 success: function () {
                     alert("현장이 삭제되었습니다.");
                     window.location.href = "/loginOk";
@@ -1148,8 +1203,9 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
 
-    refreshVisibleItemStates();
-    updatePendingSyncBadge();
+    await refreshServerPhotoBasedStates();
+    await refreshVisibleItemStates();
+    await updatePendingSyncBadge();
 });
 
 let currentResultTarget = null;
@@ -1203,34 +1259,48 @@ async function confirmAndSaveIfNeeded() {
     if (!currentOpenCard) return true;
 
     try {
+        const editor = currentOpenCard.querySelector(".item-editor");
+        if (!editor) return true;
+
+        buildSpecialSheetMemoIfNeeded(editor);
+
         const dirty = await hasUnsavedChanges(currentOpenCard);
 
         if (!dirty) {
             return true;
         }
 
-        const saveBtn = currentOpenCard.querySelector(".inline-save-btn");
         const ok = confirm("저장하지 않은 메모 또는 사진이 있습니다.\n로컬에 저장 후 이동할까요?");
 
         if (!ok) {
             return false;
         }
 
-        if (saveBtn) {
-            isAutoSavingBeforeMove = true;
-            blockPhotoPicker(2000);
+        isAutoSavingBeforeMove = true;
+        blockPhotoPicker(2000);
+
+        const targetBoxes = editor.querySelectorAll(".seoul-sub-item-box").length > 0
+            ? Array.from(editor.querySelectorAll(".seoul-sub-item-box"))
+            : [editor];
+
+        for (const targetBox of targetBoxes) {
+            const saveBtn = targetBox.querySelector(".inline-save-btn");
+            if (!saveBtn) continue;
 
             const saved = await saveInlineInspection(saveBtn, {
                 silent: true,
                 keepOpen: false
             });
 
-            setTimeout(() => {
+            if (!saved) {
                 isAutoSavingBeforeMove = false;
-            }, 300);
-
-            return !!saved;
+                return false;
+            }
         }
+
+        setTimeout(() => {
+            isAutoSavingBeforeMove = false;
+        }, 300);
 
         return true;
     } catch (e) {
@@ -1295,6 +1365,7 @@ async function getLocationDeleteSummary(siteId, categoryGroup, locationBox = nul
 
             const itemId = saveBtn.dataset.itemId;
             const group = saveBtn.dataset.categoryGroup;
+            const subItemId = saveBtn.dataset.subItemId || 0;
 
             if (group !== categoryGroup) continue;
 
@@ -1302,7 +1373,7 @@ async function getLocationDeleteSummary(siteId, categoryGroup, locationBox = nul
                 const serverRes = await $.ajax({
                     type: "GET",
                     url: "/inspection/detail",
-                    data: { siteId, itemId, categoryGroup: group }
+                    data: { siteId, itemId, categoryGroup: group, subItemId }
                 });
 
                 if ((serverRes.memo || "").trim() !== "") {
@@ -1389,8 +1460,11 @@ function clearAllInlinePhotos(editor) {
 function resetInspectionState(itemCard, targetResult) {
     const siteId = $("#siteId").val();
     const saveBtn = itemCard.querySelector(".inline-save-btn");
+    if (!saveBtn) return;
+
     const itemId = saveBtn.dataset.itemId;
     const categoryGroup = saveBtn.dataset.categoryGroup;
+    const subItemId = getSubItemIdFromButton(saveBtn);
     const editor = itemCard.querySelector(".item-editor");
 
     $.ajax({
@@ -1400,6 +1474,7 @@ function resetInspectionState(itemCard, targetResult) {
             siteId,
             itemId,
             categoryGroup,
+            subItemId,
             targetResult
         },
         success: function () {
@@ -1535,20 +1610,59 @@ function saveCategoryEdit() {
     });
 }
 
+async function saveOpenEditorBeforeSync() {
+    const currentOpenCard = getCurrentOpenItemCard();
+    if (!currentOpenCard) return true;
+
+    const editor = currentOpenCard.querySelector(".item-editor");
+    if (!editor) return true;
+
+    const dirty = await hasUnsavedChanges(currentOpenCard);
+    if (!dirty) return true;
+
+    const targetBoxes = editor.querySelectorAll(".seoul-sub-item-box").length > 0
+        ? Array.from(editor.querySelectorAll(".seoul-sub-item-box"))
+        : [editor];
+
+    for (const targetBox of targetBoxes) {
+        const saveBtn = targetBox.querySelector(".inline-save-btn");
+        if (!saveBtn) continue;
+
+        const saved = await saveInlineInspection(saveBtn, {
+            silent: true,
+            keepOpen: true
+        });
+
+        if (!saved) return false;
+    }
+
+    return true;
+}
+
 async function syncOfflineData() {
     if (isSyncing) return;
+
+    const ok = await confirmAndSaveIfNeeded();
+    if (!ok) return;
 
     const siteId = Number($("#siteId").val());
 
     try {
+        const savedBeforeSync = await saveOpenEditorBeforeSync();
+        if (!savedBeforeSync) {
+            alert("열려있는 항목 저장 실패로 동기화를 중단합니다.");
+            return;
+        }
+
         isSyncing = true;
         setSyncLoading(true, "동기화 준비 중입니다.");
 
-        const allResults = await OfflineDB.getAll("draft_results");
-        const allPhotos = await OfflineDB.getAll("draft_photos");
+        let allResults = await OfflineDB.getAll("draft_results");
+        let allPhotos = await OfflineDB.getAll("draft_photos");
 
         const results = allResults.filter(x =>
-            x.siteId === siteId && x.syncStatus === "pending"
+            Number(x.siteId) === siteId &&
+            x.syncStatus === "pending"
         );
 
         const resultDraftKeys = new Set(results.map(r => r.draftKey));
@@ -1557,10 +1671,9 @@ async function syncOfflineData() {
             if (x.syncStatus !== "pending") return false;
             if (x.isDeleted === true) return false;
             if (!x.draftKey) return false;
+            if (!x.fileBlob) return false;
 
-            const parts = x.draftKey.split("_");
-            const photoSiteId = Number(parts[0]);
-
+            const photoSiteId = Number(x.siteId) || Number(getSiteIdFromDraftKey(x.draftKey));
             if (photoSiteId !== siteId) return false;
 
             return !resultDraftKeys.has(x.draftKey);
@@ -1569,27 +1682,26 @@ async function syncOfflineData() {
         const orphanDraftKeySet = new Set();
 
         for (const photo of orphanPhotos) {
-            if (orphanDraftKeySet.has(photo.draftKey)) {
-                continue;
-            }
-
+            if (orphanDraftKeySet.has(photo.draftKey)) continue;
             orphanDraftKeySet.add(photo.draftKey);
 
             const parts = photo.draftKey.split("_");
 
-            if (parts.length < 3) {
+            if (parts.length < 4) {
                 throw new Error(`잘못된 사진 draftKey입니다: ${photo.draftKey}`);
             }
 
             const photoSiteId = Number(parts[0]);
             const itemId = Number(parts[1]);
-            const categoryGroup = parts.slice(2).join("_");
+            const subItemId = Number(parts[parts.length - 1] || 0);
+            const categoryGroup = parts.slice(2, parts.length - 1).join("_");
 
             const autoDraft = {
                 draftKey: photo.draftKey,
                 siteId: photoSiteId,
-                itemId: itemId,
-                categoryGroup: categoryGroup,
+                itemId,
+                subItemId,
+                categoryGroup,
                 result: "작성",
                 memo: "",
                 updatedAt: new Date().toISOString(),
@@ -1602,28 +1714,38 @@ async function syncOfflineData() {
             resultDraftKeys.add(photo.draftKey);
         }
 
+        allPhotos = await OfflineDB.getAll("draft_photos");
+
         const uploadPhotos = allPhotos.filter(x => {
             if (x.syncStatus !== "pending") return false;
             if (x.isDeleted === true) return false;
-            return !!x.draftKey && resultDraftKeys.has(x.draftKey);
+            if (!x.fileBlob) return false;
+            if (!x.draftKey) return false;
+
+            const photoSiteId = Number(x.siteId) || Number(getSiteIdFromDraftKey(x.draftKey));
+            if (photoSiteId !== siteId) return false;
+
+            return resultDraftKeys.has(x.draftKey);
         });
 
         const deletePhotos = allPhotos.filter(x => {
             if (x.syncStatus !== "pending") return false;
             if (x.isDeleted !== true) return false;
-            return !!x.serverPhotoId;
+            if (!x.serverPhotoId) return false;
+
+            return Number(x.siteId) === siteId ||
+                Number(getSiteIdFromDraftKey(x.draftKey)) === siteId;
         });
 
         const totalSteps = results.length + uploadPhotos.length + deletePhotos.length;
 
-        if (results.length === 0 && uploadPhotos.length === 0 && deletePhotos.length === 0) {
+        if (totalSteps === 0) {
             updateSyncProgress(0, 0, "동기화할 데이터가 없습니다.");
             finishSyncStatus(true, "동기화할 데이터가 없습니다. 완료 버튼을 눌러 닫아주세요.");
             return;
         }
 
         let doneSteps = 0;
-
         updateSyncProgress(doneSteps, totalSteps, "점검 결과를 서버에 저장하는 중입니다.");
 
         const res = await fetch(`/sync/site/${siteId}`, {
@@ -1648,7 +1770,7 @@ async function syncOfflineData() {
         const resultIdMap = data.resultIdMap || {};
 
         doneSteps += results.length;
-        updateSyncProgress(doneSteps, totalSteps, "점검 결과 동기화 완료");
+        updateSyncProgress(doneSteps, totalSteps, "점검 결과 저장 완료. 사진 동기화 중입니다.");
 
         for (const photo of deletePhotos) {
             const deleteRes = await fetch("/inspection/photo/delete", {
@@ -1673,7 +1795,7 @@ async function syncOfflineData() {
             await OfflineDB.deleteByKey("draft_photos", photo.photoKey);
 
             doneSteps++;
-            updateSyncProgress(doneSteps, totalSteps, "기존 사진 삭제 중.");
+            updateSyncProgress(doneSteps, totalSteps, `기존 사진 삭제 중입니다. (${doneSteps}/${totalSteps})`);
         }
 
         for (const photo of uploadPhotos) {
@@ -1686,6 +1808,7 @@ async function syncOfflineData() {
             const formData = new FormData();
             formData.append("resultId", resultId);
             formData.append("photo", photo.fileBlob, photo.fileName || "photo.jpg");
+            formData.append("slotIndex", photo.slotIndex ?? 0);
 
             const uploadRes = await fetch("/sync/photo/upload", {
                 method: "POST",
@@ -1704,17 +1827,21 @@ async function syncOfflineData() {
             await OfflineDB.deleteByKey("draft_photos", photo.photoKey);
 
             doneSteps++;
-            updateSyncProgress(doneSteps, totalSteps, "사진 업로드 중.");
+            updateSyncProgress(doneSteps, totalSteps, `사진 업로드 중입니다. (${doneSteps}/${totalSteps})`);
         }
 
         for (const r of results) {
             await OfflineDB.deleteByKey("draft_results", r.draftKey);
         }
 
-        await refreshVisibleItemStates();
         await updatePendingSyncBadge();
 
-        finishSyncStatus(true, "동기화가 완료되었습니다. 완료 버튼을 눌러 닫아주세요.");
+        finishSyncStatus(true, "동기화가 완료되었습니다. 화면을 새로고침합니다.");
+
+        setTimeout(() => {
+            location.reload();
+        }, 800);
+
     } catch (e) {
         console.error(e);
         finishSyncStatus(false, e.message || "동기화 중 문제가 발생했습니다.");
@@ -1772,47 +1899,65 @@ async function openDownloadModal() {
             const selectedPairs = [];
 
             for (const card of itemCards) {
-                const saveBtn = card.querySelector(".inline-save-btn");
-                if (!saveBtn) continue;
+                const editor = card.querySelector(".item-editor");
+                if (!editor) continue;
 
-                const itemId = saveBtn.dataset.itemId;
-                const categoryGroup = saveBtn.dataset.categoryGroup;
-                const draftKey = makeDraftKey(siteId, itemId, categoryGroup);
+                const targetBoxes = editor.querySelectorAll(".seoul-sub-item-box").length > 0
+                    ? Array.from(editor.querySelectorAll(".seoul-sub-item-box"))
+                    : [editor];
 
-                const localDraft = allDrafts.find(x => x.draftKey === draftKey);
-                const localPhotos = allPhotos.filter(x => x.draftKey === draftKey && x.isDeleted !== true);
+                for (const targetBox of targetBoxes) {
+                    const saveBtn = targetBox.querySelector(".inline-save-btn");
+                    if (!saveBtn) continue;
 
-                let serverRes = null;
-                try {
-                    serverRes = await $.ajax({
-                        type: "GET",
-                        url: "/inspection/detail",
-                        data: { siteId, itemId, categoryGroup }
-                    });
-                } catch (e) {
-                    console.error("다운로드 항목 조회 실패", e);
-                    continue;
-                }
+                    const itemId = saveBtn.dataset.itemId;
+                    const categoryGroup = saveBtn.dataset.categoryGroup;
+                    const subItemId = getSubItemIdFromButton(saveBtn);
+                    const draftKey = makeDraftKey(siteId, itemId, categoryGroup, subItemId);
 
-                const deletedServerPhotoIds = allPhotos
-                    .filter(photo => photo.isDeleted === true && photo.serverPhotoId)
-                    .map(photo => Number(photo.serverPhotoId));
+                    const localDraft = allDrafts.find(x => x.draftKey === draftKey);
+                    const localPhotos = allPhotos.filter(x =>
+                        x.draftKey === draftKey &&
+                        x.isDeleted !== true
+                    );
 
-                const serverPhotos = (serverRes.photos || [])
-                    .filter(photo => !deletedServerPhotoIds.includes(Number(photo.id)));
+                    let serverRes = null;
 
-                const finalMemo = localDraft ? (localDraft.memo || "") : (serverRes.memo || "");
-                const finalResult = localDraft ? (localDraft.result || "미작성") : (serverRes.result || "미작성");
-                const photoCount = serverPhotos.length + localPhotos.length;
+                    try {
+                        serverRes = await $.ajax({
+                            type: "GET",
+                            url: "/inspection/detail",
+                            data: { siteId, itemId, categoryGroup, subItemId }
+                        });
+                    } catch (e) {
+                        console.error("다운로드 항목 조회 실패", e);
+                        continue;
+                    }
 
-                const hasValue =
-                    finalResult === "해당사항없음" ||
-                    (finalMemo && finalMemo.trim() !== "") ||
-                    photoCount > 0;
+                    const deletedServerPhotoIds = allPhotos
+                        .filter(photo =>
+                            photo.draftKey === draftKey &&
+                            photo.isDeleted === true &&
+                            photo.serverPhotoId
+                        )
+                        .map(photo => Number(photo.serverPhotoId));
 
-                if (hasValue) {
-                    hasValueInCategory = true;
-                    selectedPairs.push(`${itemId}::${categoryGroup}`);
+                    const serverPhotos = (serverRes.photos || [])
+                        .filter(photo => !deletedServerPhotoIds.includes(Number(photo.id)));
+
+                    const finalMemo = localDraft ? (localDraft.memo || "") : (serverRes.memo || "");
+                    const finalResult = localDraft ? (localDraft.result || "미작성") : (serverRes.result || "미작성");
+                    const photoCount = serverPhotos.length + localPhotos.length;
+
+                    const hasValue =
+                        finalResult === "해당사항없음" ||
+                        (finalMemo && finalMemo.trim() !== "") ||
+                        photoCount > 0;
+
+                    if (hasValue) {
+                        hasValueInCategory = true;
+                        selectedPairs.push(`${itemId}::${categoryGroup}::${subItemId}`);
+                    }
                 }
             }
 
@@ -1846,6 +1991,106 @@ async function openDownloadModal() {
         closeZipLoading();
         alert("다운로드 항목 조회 중 오류가 발생했습니다.");
     }
+}
+
+async function refreshServerPhotoBasedStates() {
+    const siteId = $("#siteId").val();
+    const allLocalPhotos = await OfflineDB.getAll("draft_photos");
+
+    const itemCards = Array.from(document.querySelectorAll(".item-card"));
+
+    for (const itemCard of itemCards) {
+        const saveBtns = Array.from(itemCard.querySelectorAll(".inline-save-btn"));
+        if (saveBtns.length === 0) continue;
+
+        let hasWritten = false;
+        let hasNA = false;
+
+        for (const saveBtn of saveBtns) {
+            const itemId = saveBtn.dataset.itemId;
+            const categoryGroup = saveBtn.dataset.categoryGroup;
+            const subItemId = saveBtn.dataset.subItemId || 0;
+            const draftKey = makeDraftKey(siteId, itemId, categoryGroup, subItemId);
+
+            try {
+                const serverRes = await $.ajax({
+                    type: "GET",
+                    url: "/inspection/detail",
+                    data: {
+                        siteId,
+                        itemId,
+                        categoryGroup,
+                        subItemId
+                    }
+                });
+
+                const deletedServerPhotoIds = allLocalPhotos
+                    .filter(p =>
+                        p.draftKey === draftKey &&
+                        p.isDeleted === true &&
+                        p.serverPhotoId
+                    )
+                    .map(p => Number(p.serverPhotoId));
+
+                const serverPhotos = (serverRes.photos || [])
+                    .filter(p => !deletedServerPhotoIds.includes(Number(p.id)));
+
+                const localPhotos = allLocalPhotos.filter(p =>
+                    p.draftKey === draftKey &&
+                    p.isDeleted !== true &&
+                    p.fileBlob
+                );
+
+                const hasMemo = !!(serverRes.memo && serverRes.memo.trim() !== "");
+                const hasPhoto = serverPhotos.length > 0 || localPhotos.length > 0;
+                const result = serverRes.result || "미작성";
+
+                const targetBox = getTargetBoxForSaveButton(saveBtn);
+                if (targetBox) {
+                    if (result === "해당사항없음") {
+                        targetBox.dataset.currentResult = "해당사항없음";
+                    } else if (result === "작성" || hasMemo || hasPhoto) {
+                        targetBox.dataset.currentResult = "작성";
+                    } else {
+                        targetBox.dataset.currentResult = "미작성";
+                    }
+                }
+
+                if (result === "해당사항없음") hasNA = true;
+                if (result === "작성" || hasMemo || hasPhoto) hasWritten = true;
+
+            } catch (e) {
+                console.warn("초기 사진 상태 조회 실패", e);
+            }
+        }
+
+        if (hasNA) {
+            itemCard.dataset.currentResult = "해당사항없음";
+        } else if (hasWritten) {
+            itemCard.dataset.currentResult = "작성";
+        } else {
+            itemCard.dataset.currentResult = "미작성";
+        }
+
+        const row = itemCard.querySelector(".item-row");
+        if (row) {
+            if (
+                itemCard.dataset.currentResult === "작성" ||
+                itemCard.dataset.currentResult === "해당사항없음"
+            ) {
+                row.classList.add("done");
+            } else {
+                row.classList.remove("done");
+            }
+        }
+
+        syncStatusButton(itemCard);
+
+        const locationBox = itemCard.closest(".location-box");
+        if (locationBox) updateLocationProgress(locationBox);
+    }
+
+    recalcSiteProgress();
 }
 
 function closeDownloadModal() {
@@ -1903,20 +2148,24 @@ async function submitSelectedDownload() {
     const addedKeys = new Set();
     const itemIds = [];
     const categoryGroups = [];
+    const subItemIds = [];
 
     checked.forEach(chk => {
         const pairs = (chk.dataset.pairs || "").split("|").filter(Boolean);
 
         pairs.forEach(pair => {
-            const [itemId, categoryGroup] = pair.split("::");
+            const [itemId, categoryGroup, subItemIdRaw] = pair.split("::");
+            const subItemId = subItemIdRaw || 0;
+
             if (!itemId || !categoryGroup) return;
 
-            const key = `${itemId}::${categoryGroup}`;
+            const key = `${itemId}::${categoryGroup}::${subItemId}`;
             if (addedKeys.has(key)) return;
 
             addedKeys.add(key);
             itemIds.push(Number(itemId));
             categoryGroups.push(categoryGroup);
+            subItemIds.push(Number(subItemId || 0));
         });
     });
 
@@ -1927,7 +2176,7 @@ async function submitSelectedDownload() {
 
     let progressTimer = null;
 
-    closeDownloadModal();          // 추가
+    closeDownloadModal();
     openZipLoading();
     setZipProgress(10, "ZIP 파일 생성 중...");
     startZipStatusAnimation();
@@ -1942,7 +2191,8 @@ async function submitSelectedDownload() {
             },
             body: JSON.stringify({
                 itemIds,
-                categoryGroups
+                categoryGroups,
+                subItemIds
             })
         });
 
@@ -1985,92 +2235,7 @@ async function submitSelectedDownload() {
     }
 }
 
-async function startExcelDownload(siteId) {
-    if (window.__excelDownloading === true) return;
-    window.__excelDownloading = true;
 
-    openExcelLoading();
-
-    let progressTimer = null;
-
-    try {
-        progressTimer = startExcelFakeProgress();
-
-        const response = await fetch(`/site/${siteId}/excel`, {
-            method: "GET"
-        });
-
-        if (!response.ok) {
-            throw new Error("엑셀 다운로드 실패");
-        }
-
-        const blob = await response.blob();
-
-        finishExcelProgress("다운로드 시작 중...");
-
-        const disposition = response.headers.get("Content-Disposition") || "";
-        const fileName = getFileNameFromDisposition(disposition) || `site_${siteId}.xlsx`;
-
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-
-        window.URL.revokeObjectURL(url);
-
-        setExcelProgress(100, "다운로드 완료");
-        document.getElementById("excelCloseBtn").disabled = false;
-
-        setTimeout(() => {
-            closeExcelLoading();
-        }, 800);
-
-    } catch (e) {
-        console.error(e);
-        stopExcelFakeProgress(progressTimer);
-        setExcelProgress(0, "엑셀 다운로드 실패");
-        document.getElementById("excelCloseBtn").disabled = false;
-        alert("엑셀 다운로드 중 오류가 발생했습니다.");
-    } finally {
-        stopExcelFakeProgress(progressTimer);
-        window.__excelDownloading = false;
-    }
-}
-
-function startExcelFakeProgress() {
-    let progress = 0;
-
-    const timer = setInterval(() => {
-        if (progress < 30) {
-            progress += 4;
-        } else if (progress < 60) {
-            progress += 2;
-        } else if (progress < 85) {
-            progress += 1;
-        } else if (progress < 90) {
-            progress += 0.3;
-        }
-
-        if (progress > 90) {
-            progress = 90;
-        }
-
-        setExcelProgress(progress, "엑셀 변환 중...");
-    }, 200);
-
-    return timer;
-}
-
-function openExcelLoading() {
-    document.getElementById("excelLoadingModal").style.display = "flex";
-    document.getElementById("excelProgressFill").style.width = "0%";
-    document.getElementById("excelProgressText").innerText = "0%";
-    document.getElementById("excelStatusText").innerText = "엑셀 변환 중...";
-    document.getElementById("excelCloseBtn").disabled = true;
-}
 
 function closeExcelLoading() {
     document.getElementById("excelLoadingModal").style.display = "none";
@@ -2084,16 +2249,6 @@ function setExcelProgress(percent, statusText) {
     if (statusText) {
         document.getElementById("excelStatusText").innerText = statusText;
     }
-}
-
-function stopExcelFakeProgress(timer) {
-    if (timer) {
-        clearInterval(timer);
-    }
-}
-
-function finishExcelProgress(statusText = "다운로드 준비 완료") {
-    setExcelProgress(100, statusText);
 }
 
 function getFileNameFromDisposition(disposition) {
@@ -2110,61 +2265,6 @@ function getFileNameFromDisposition(disposition) {
     }
 
     return null;
-}
-
-async function startZipDownload(siteId) {
-    if (window.__zipDownloading === true) return;
-    window.__zipDownloading = true;
-
-    openZipLoading();
-
-    let progressTimer = null;
-
-    try {
-        progressTimer = startZipFakeProgress();
-
-        const response = await fetch(`/site/${siteId}/download`, {
-            method: "GET"
-        });
-
-        if (!response.ok) {
-            throw new Error("ZIP 다운로드 실패");
-        }
-
-        const blob = await response.blob();
-
-        finishZipProgress("ZIP 생성 완료. 다운로드 시작 중...");
-
-        const disposition = response.headers.get("Content-Disposition") || "";
-        const fileName = getFileNameFromDisposition(disposition) || `site_${siteId}.zip`;
-
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-
-        window.URL.revokeObjectURL(url);
-
-        setZipProgress(100, "다운로드 완료");
-        document.getElementById("zipCloseBtn").disabled = false;
-
-        setTimeout(() => {
-            closeZipLoading();
-        }, 800);
-
-    } catch (e) {
-        console.error(e);
-        stopZipFakeProgress(progressTimer);
-        setZipProgress(0, "ZIP 다운로드 실패");
-        document.getElementById("zipCloseBtn").disabled = false;
-        alert("전체 다운로드 중 오류가 발생했습니다.");
-    } finally {
-        stopZipFakeProgress(progressTimer);
-        window.__zipDownloading = false;
-    }
 }
 
 function openZipLoading() {
@@ -2331,19 +2431,19 @@ async function attachGalleryPhotoToSlot(input) {
     const file = input.files && input.files[0];
     if (!file) return;
 
-    const editor = input.closest(".item-editor");
-    if (!editor) return;
+    const targetBox = input.closest(".seoul-sub-item-box") || input.closest(".item-editor");
+    if (!targetBox) return;
 
-    let slot = editor.querySelector(".photo-slot.empty");
+    let slot = targetBox.querySelector(".photo-slot.empty");
 
     if (!slot) {
-        const grid = editor.querySelector(".editor-photo-grid");
+        const grid = targetBox.querySelector(".editor-photo-grid");
         slot = createPhotoSlot();
         grid.appendChild(slot);
         bindInlinePhotoSlot(slot);
     }
 
-    const saveBtn = editor.querySelector(".inline-save-btn");
+    const saveBtn = getSaveBtnForTarget(input);
 
     if (!saveBtn) {
         alert("저장 대상 항목을 찾지 못했습니다.");
@@ -2361,10 +2461,7 @@ async function savePhotoFileToSlot(file, slot, saveBtn) {
     const text = slot.querySelector(".photo-slot-text");
     const delBtn = slot.querySelector(".photo-delete-btn");
 
-    const siteId = $("#siteId").val();
-    const itemId = saveBtn.dataset.itemId;
-    const categoryGroup = saveBtn.dataset.categoryGroup;
-    const draftKey = makeDraftKey(siteId, itemId, categoryGroup);
+    const { siteId, itemId, categoryGroup, subItemId, draftKey } = getDraftInfoFromSaveBtn(saveBtn);
 
     try {
         markPhotoSlotPending(slot);
@@ -2374,6 +2471,11 @@ async function savePhotoFileToSlot(file, slot, saveBtn) {
         if (savedPhotoId) {
             await OfflineDB.putAndVerify("draft_photos", {
                 photoKey: `delete_${savedPhotoId}`,
+                siteId: Number(siteId),
+                itemId: Number(itemId),
+                subItemId: Number(subItemId || 0),
+                categoryGroup,
+                draftKey,
                 serverPhotoId: Number(savedPhotoId),
                 isDeleted: true,
                 syncStatus: "pending",
@@ -2390,9 +2492,14 @@ async function savePhotoFileToSlot(file, slot, saveBtn) {
 
         await OfflineDB.putAndVerify("draft_photos", {
             photoKey,
+            siteId: Number(siteId),
+            itemId: Number(itemId),
+            subItemId: Number(subItemId || 0),
+            categoryGroup,
             draftKey,
             fileBlob: file,
             fileName: file.name || "photo.jpg",
+            slotIndex: getPhotoSlotIndex(slot),
             isDeleted: false,
             syncStatus: "pending",
             createdAt: new Date().toISOString()
@@ -2450,34 +2557,10 @@ async function savePhotoFileToSlot(file, slot, saveBtn) {
 
 function saveEfficiencySheet(button) {
     const editor = button.closest(".item-editor");
-    const memo = editor.querySelector(".efficiency-json-memo");
-    const inputs = editor.querySelectorAll(".eff-input");
 
-    const rows = {};
-    const summary = {};
-
-    inputs.forEach(input => {
-        const row = input.dataset.row;
-        const field = input.dataset.field;
-        const summaryField = input.dataset.summary;
-
-        if (row && field) {
-            if (!rows[row]) rows[row] = {};
-            rows[row][field] = input.value || "";
-        }
-
-        if (summaryField) {
-            summary[summaryField] = input.value || "";
-        }
-    });
-
-    memo.value = JSON.stringify({
-        type: "efficiencySheet",
-        rows,
-        summary
-    });
-
+    saveEfficiencySheetToMemoOnly(editor);
     mergeSpecialVisibleMemo(editor);
+
     saveInlineInspection(button);
 }
 
@@ -2529,7 +2612,16 @@ async function renameLocation(button) {
         },
         success: async function (res) {
             try {
-                const newCategoryGroup = res.newGroupName;
+                const newCategoryGroup =
+                    typeof res === "string" ? res : res.newGroupName;
+
+                console.log("oldCategoryGroup =", oldCategoryGroup);
+                console.log("newCategoryGroup =", newCategoryGroup);
+
+                if (!newCategoryGroup) {
+                    alert("새 위치 그룹명을 받지 못했습니다.");
+                    return;
+                }
 
                 await updateLocalDraftCategoryGroup(
                     Number(siteId),
@@ -2578,7 +2670,8 @@ async function renameLocation(button) {
                                 const fakeBtn = {
                                     dataset: {
                                         itemId: saveBtn.dataset.itemId,
-                                        categoryGroup: saveBtn.dataset.categoryGroup
+                                        categoryGroup: saveBtn.dataset.categoryGroup,
+                                        subItemId: saveBtn.dataset.subItemId || 0
                                     },
                                     closest: () => card
                                 };
@@ -2640,13 +2733,15 @@ async function updateLocalDraftCategoryGroup(siteId, oldCategoryGroup, newCatego
 
     for (const draft of targetResults) {
         const oldDraftKey = draft.draftKey;
-        const newDraftKey = makeDraftKey(siteId, draft.itemId, newCategoryGroup);
+        const subItemId = draft.subItemId || 0;
+        const newDraftKey = makeDraftKey(siteId, draft.itemId, newCategoryGroup, subItemId);
 
         changedKeyMap.set(oldDraftKey, newDraftKey);
 
         await OfflineDB.deleteByKey("draft_results", oldDraftKey);
 
         draft.categoryGroup = newCategoryGroup;
+        draft.subItemId = Number(subItemId || 0);
         draft.draftKey = newDraftKey;
         draft.updatedAt = new Date().toISOString();
         draft.syncStatus = "pending";
@@ -2762,123 +2857,25 @@ function restoreFanControlSheet(editor, memoValue) {
 
 async function saveAirflowSheet(button) {
     const editor = button.closest(".item-editor");
-    const memo = editor.querySelector(".airflow-json-memo");
 
-    const data = {
-        type: "airflowSheet",
-        tables: {}
-    };
-
-    editor.querySelectorAll(".airflow-input").forEach(input => {
-        const table = input.dataset.table;
-        const row = input.dataset.row;
-        const col = input.dataset.col;
-        const value = input.value || "";
-
-        if (!data.tables[table]) {
-            data.tables[table] = {
-                rows: {},
-                summary: {}
-            };
-        }
-
-        if (!data.tables[table].rows[row]) {
-            data.tables[table].rows[row] = {};
-        }
-
-        data.tables[table].rows[row][col] = value;
-    });
-
-    editor.querySelectorAll(".airflow-summary-input").forEach(input => {
-        const table = input.dataset.table;
-        const key = input.dataset.summary;
-        const value = input.value || "";
-
-        if (!data.tables[table]) {
-            data.tables[table] = {
-                rows: {},
-                summary: {}
-            };
-        }
-
-        data.tables[table].summary[key] = value;
-    });
-
-    memo.value = JSON.stringify(data);
-
+    saveAirflowSheetToMemoOnly(editor);
     mergeSpecialVisibleMemo(editor);
+
     await saveInlineInspection(button);
 }
 
 async function saveFanControlSheet(button) {
     const editor = button.closest(".item-editor");
-    const memo = editor.querySelector(".fan-control-json-memo");
 
-    const data = {
-        type: "fanControlSheet",
-        rows: {}
-    };
-
-    editor.querySelectorAll(".fan-control-input").forEach(input => {
-        const row = input.dataset.row;
-        const field = input.dataset.field;
-        const value = input.value || "";
-
-        if (!data.rows[row]) {
-            data.rows[row] = {};
-        }
-
-        data.rows[row][field] = value;
-    });
-
-    memo.value = JSON.stringify(data);
-
+    saveFanControlSheetToMemoOnly(editor);
     mergeSpecialVisibleMemo(editor);
+
     await saveInlineInspection(button);
 }
 
 $(document).on("input", ".eff-calc-input, .eff-input[data-field='energy']", function () {
     calculateEfficiencySheet($(this).closest(".efficiency-sheet-wrap"));
 });
-
-async function saveLocalInspectionDraft(data) {
-    const draftKey = makeDraftKey(data.siteId, data.itemId, data.categoryGroup);
-
-    await OfflineDB.putAndVerify("draft_results", {
-        draftKey,
-        siteId: Number(data.siteId),
-        itemId: Number(data.itemId),
-        categoryGroup: data.categoryGroup,
-        result: data.result || "작성",
-        memo: data.memo || "",
-        updatedAt: new Date().toISOString(),
-        syncStatus: "pending"
-    }, "draftKey");
-
-    await updatePendingSyncBadge();
-}
-
-function markItemSaved(btn) {
-    const itemCard = btn.closest(".item-card");
-    if (!itemCard) return;
-
-    const itemRow = itemCard.querySelector(".item-row");
-
-    itemCard.dataset.currentResult = "작성";
-
-    if (itemRow) {
-        itemRow.classList.add("done");
-    }
-
-    syncStatusButton(itemCard);
-
-    const locationBox = itemCard.closest(".location-box");
-    if (locationBox) {
-        updateLocationProgress(locationBox);
-    }
-
-    recalcSiteProgress();
-}
 
 function toNumber(value) {
     const n = parseFloat(value);
@@ -3053,4 +3050,417 @@ function mergeSpecialVisibleMemo(editor) {
 
     data.userMemo = visibleMemo ? visibleMemo.value.trim() : "";
     jsonMemo.value = JSON.stringify(data);
+}
+
+function buildSpecialSheetMemoIfNeeded(editor) {
+    if (!editor) return;
+
+    if (editor.querySelector(".airflow-json-memo")) {
+        saveAirflowSheetToMemoOnly(editor);
+    }
+
+    if (editor.querySelector(".efficiency-json-memo")) {
+        saveEfficiencySheetToMemoOnly(editor);
+    }
+
+    if (editor.querySelector(".fan-control-json-memo")) {
+        saveFanControlSheetToMemoOnly(editor);
+    }
+
+    mergeSpecialVisibleMemo(editor);
+}
+
+function saveAirflowSheetToMemoOnly(editor) {
+    const memo = editor.querySelector(".airflow-json-memo");
+    if (!memo) return;
+
+    const data = {
+        type: "airflowSheet",
+        tables: {}
+    };
+
+    editor.querySelectorAll(".airflow-input").forEach(input => {
+        const table = input.dataset.table;
+        const row = input.dataset.row;
+        const col = input.dataset.col;
+        const value = input.value || "";
+
+        if (!table || !row || !col) return;
+
+        if (!data.tables[table]) {
+            data.tables[table] = {
+                rows: {},
+                summary: {}
+            };
+        }
+
+        if (!data.tables[table].rows[row]) {
+            data.tables[table].rows[row] = {};
+        }
+
+        data.tables[table].rows[row][col] = value;
+    });
+
+    editor.querySelectorAll(".airflow-summary-input").forEach(input => {
+        const table = input.dataset.table;
+        const key = input.dataset.summary;
+        const value = input.value || "";
+
+        if (!table || !key) return;
+
+        if (!data.tables[table]) {
+            data.tables[table] = {
+                rows: {},
+                summary: {}
+            };
+        }
+
+        data.tables[table].summary[key] = value;
+    });
+
+    memo.value = JSON.stringify(data);
+}
+
+function saveFanControlSheetToMemoOnly(editor) {
+    const memo = editor.querySelector(".fan-control-json-memo");
+    if (!memo) return;
+
+    const data = {
+        type: "fanControlSheet",
+        rows: {}
+    };
+
+    editor.querySelectorAll(".fan-control-input").forEach(input => {
+        const row = input.dataset.row;
+        const field = input.dataset.field;
+        const value = input.value || "";
+
+        if (!row || !field) return;
+
+        if (!data.rows[row]) {
+            data.rows[row] = {};
+        }
+
+        data.rows[row][field] = value;
+    });
+
+    memo.value = JSON.stringify(data);
+}
+
+function saveEfficiencySheetToMemoOnly(editor) {
+    const memo = editor.querySelector(".efficiency-json-memo");
+    if (!memo) return;
+
+    const rows = {};
+    const summary = {};
+
+    editor.querySelectorAll(".eff-input").forEach(input => {
+        const row = input.dataset.row;
+        const field = input.dataset.field;
+        const summaryField = input.dataset.summary;
+
+        if (row && field) {
+            if (!rows[row]) rows[row] = {};
+            rows[row][field] = input.value || "";
+        }
+
+        if (summaryField) {
+            summary[summaryField] = input.value || "";
+        }
+    });
+
+    memo.value = JSON.stringify({
+        type: "efficiencySheet",
+        rows,
+        summary
+    });
+}
+
+async function downloadWithRealProgress(response, setProgressFn, statusPrefix) {
+    const contentLength = response.headers.get("Content-Length");
+    const total = contentLength ? Number(contentLength) : 0;
+
+    if (!response.body) {
+        return await response.blob();
+    }
+
+    const reader = response.body.getReader();
+    const chunks = [];
+    let received = 0;
+
+    while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        chunks.push(value);
+        received += value.length;
+
+        if (total > 0) {
+            const percent = Math.min(99, Math.round((received / total) * 100));
+            const mbNow = (received / 1024 / 1024).toFixed(1);
+            const mbTotal = (total / 1024 / 1024).toFixed(1);
+
+            setProgressFn(percent, `${statusPrefix} ${mbNow}MB / ${mbTotal}MB`);
+        } else {
+            const mbNow = (received / 1024 / 1024).toFixed(1);
+            setProgressFn(50, `${statusPrefix} ${mbNow}MB 수신 중...`);
+        }
+    }
+
+    return new Blob(chunks);
+}
+
+async function startExcelDownload() {
+    const siteId = $("#siteId").val();
+
+    if (!siteId) {
+        alert("현장 ID를 찾지 못했습니다.");
+        return;
+    }
+
+    const modal = document.getElementById("excelLoadingModal");
+    const closeBtn = document.getElementById("excelCloseBtn");
+
+    if (modal) modal.style.display = "flex";
+    if (closeBtn) closeBtn.disabled = true;
+
+    setExcelProgress(5, "엑셀 파일 생성 요청 중...");
+
+    try {
+        const response = await fetch(`/site/${siteId}/excel`, {
+            method: "GET"
+        });
+
+        if (response.redirected || response.url.includes("/login")) {
+            throw new Error("로그인이 만료되었습니다. 다시 로그인해주세요.");
+        }
+
+        if (!response.ok) {
+            const msg = await response.text().catch(() => "");
+            throw new Error(msg || "엑셀 다운로드 실패");
+        }
+
+        setExcelProgress(30, "엑셀 파일 다운로드 중...");
+
+        const blob = await downloadWithRealProgress(
+            response,
+            setExcelProgress,
+            "엑셀 다운로드 중..."
+        );
+
+        setExcelProgress(95, "파일 저장 준비 중...");
+
+        const disposition = response.headers.get("Content-Disposition") || "";
+        const fileName = getFileNameFromDisposition(disposition) || `site_${siteId}_report.xlsx`;
+
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+
+        window.URL.revokeObjectURL(url);
+
+        setExcelProgress(100, "엑셀 다운로드 완료");
+
+        if (closeBtn) closeBtn.disabled = false;
+
+        setTimeout(() => {
+            closeExcelLoading();
+        }, 800);
+
+    } catch (e) {
+        console.error(e);
+        setExcelProgress(0, "엑셀 다운로드 실패");
+        if (closeBtn) closeBtn.disabled = false;
+        alert(e.message || "엑셀 다운로드 중 오류가 발생했습니다.");
+    }
+}
+
+async function openStorageDiagnosis() {
+    const modal = document.getElementById("storageDiagnosisModal");
+    const text = document.getElementById("storageDiagnosisText");
+
+    if (modal) modal.style.display = "flex";
+    if (text) text.textContent = "확인 중...";
+
+    try {
+        const photos = await OfflineDB.getAll("draft_photos");
+        const results = await OfflineDB.getAll("draft_results");
+
+        const siteIdEl = document.getElementById("siteId");
+        const siteId = siteIdEl && siteIdEl.value ? Number(siteIdEl.value) : null;
+
+        const sitePhotos = siteId
+            ? photos.filter(p => Number(p.siteId) === siteId || getSiteIdFromDraftKey(p.draftKey) === siteId)
+            : photos;
+
+        const siteResults = siteId
+            ? results.filter(r => Number(r.siteId) === siteId || getSiteIdFromDraftKey(r.draftKey) === siteId)
+            : results;
+
+        const scopeText = siteId
+            ? `현재 현장 ID: ${siteId}`
+            : "전체 로컬 데이터";
+
+        const totalBytes = sitePhotos.reduce((sum, p) => {
+            return sum + (p.fileBlob?.size || 0);
+        }, 0);
+
+        const pendingPhotos = sitePhotos.filter(p => p.syncStatus === "pending").length;
+        const failedPhotos = sitePhotos.filter(p => p.syncStatus === "failed" || p.lastError).length;
+        const deletePhotos = sitePhotos.filter(p => p.isDeleted === true).length;
+        const memoUpdatePhotos = sitePhotos.filter(p => p.isMemoUpdate === true).length;
+        const uploadingPhotos = sitePhotos.filter(p => p.uploading === true).length;
+
+        const pendingResults = siteResults.filter(r => r.syncStatus === "pending").length;
+        const failedResults = siteResults.filter(r => r.syncStatus === "failed" || r.lastError).length;
+
+        const orphanPhotos = sitePhotos.filter(p => {
+            if (!p.draftKey) return false;
+            if (p.isDeleted === true) return false;
+            return !siteResults.some(r => r.draftKey === p.draftKey);
+        });
+
+        let usageText = "확인 불가";
+
+        try {
+            if (navigator.storage && navigator.storage.estimate) {
+                const estimate = await navigator.storage.estimate();
+
+                const usageMB = estimate.usage
+                    ? (estimate.usage / 1024 / 1024).toFixed(1)
+                    : "0";
+
+                const quotaMB = estimate.quota
+                    ? (estimate.quota / 1024 / 1024).toFixed(1)
+                    : "0";
+
+                const percent = estimate.usage && estimate.quota
+                    ? ((estimate.usage / estimate.quota) * 100).toFixed(1)
+                    : "0";
+
+                usageText = `${usageMB}MB / ${quotaMB}MB (${percent}%)`;
+            }
+        } catch (e) {
+            usageText = "확인 불가";
+        }
+
+        const biggest = sitePhotos
+            .filter(p => p.fileBlob)
+            .sort((a, b) => (b.fileBlob?.size || 0) - (a.fileBlob?.size || 0))
+            .slice(0, 5)
+            .map((p, i) => {
+                const sizeMB = (p.fileBlob.size / 1024 / 1024).toFixed(1);
+                return `${i + 1}. ${sizeMB}MB / ${p.syncStatus || "-"} / ${p.createdAt || "-"} / ${p.draftKey || "-"}`;
+            })
+            .join("\n");
+
+        const oldPhotos = sitePhotos
+            .filter(p => p.createdAt)
+            .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+            .slice(0, 5)
+            .map((p, i) => {
+                const sizeMB = p.fileBlob ? (p.fileBlob.size / 1024 / 1024).toFixed(1) : "0";
+                return `${i + 1}. ${sizeMB}MB / ${p.syncStatus || "-"} / ${p.createdAt || "-"} / ${p.draftKey || "-"}`;
+            })
+            .join("\n");
+
+        text.textContent =
+            `${scopeText}
+
+[로컬 데이터]
+사진 개수: ${sitePhotos.length}장
+점검 결과: ${siteResults.length}건
+사진 총 용량: ${(totalBytes / 1024 / 1024).toFixed(1)}MB
+
+[사진 상태]
+대기중: ${pendingPhotos}건
+실패/오류: ${failedPhotos}건
+삭제예약: ${deletePhotos}건
+메모수정: ${memoUpdatePhotos}건
+업로드중 표시: ${uploadingPhotos}건
+결과 대기중: ${pendingResults}건
+결과 실패/오류: ${failedResults}건
+고아 사진: ${orphanPhotos.length}건
+
+[브라우저 저장공간]
+${usageText}
+
+[큰 사진 TOP 5]
+${biggest || "없음"}
+
+[오래된 사진 TOP 5]
+${oldPhotos || "없음"}`;
+
+    } catch (e) {
+        console.error(e);
+        if (text) {
+            text.textContent = "저장공간 진단 중 오류가 발생했습니다.\n\n" + (e.message || e);
+        }
+    }
+}
+
+function closeStorageDiagnosis() {
+    const modal = document.getElementById("storageDiagnosisModal");
+    if (modal) modal.style.display = "none";
+}
+
+function getSiteIdFromDraftKey(draftKey) {
+    if (!draftKey) return null;
+
+    const first = String(draftKey).split("_")[0];
+    const n = Number(first);
+
+    return Number.isFinite(n) ? n : null;
+}
+
+async function getLocalPhotosByDraftKey(draftKey) {
+    const allPhotos = await OfflineDB.getAll("draft_photos");
+    return allPhotos.filter(p =>
+        p.draftKey === draftKey &&
+        p.isDeleted !== true
+    );
+}
+
+async function getPendingCountBySiteId(siteId) {
+    const allResults = await OfflineDB.getAll("draft_results");
+    const allPhotos = await OfflineDB.getAll("draft_photos");
+
+    const resultCount = allResults.filter(r =>
+        Number(r.siteId) === Number(siteId) &&
+        r.syncStatus === "pending"
+    ).length;
+
+    const photoCount = allPhotos.filter(p => {
+        if (p.syncStatus !== "pending") return false;
+        if (Number(p.siteId) === Number(siteId)) return true;
+        return Number(getSiteIdFromDraftKey(p.draftKey)) === Number(siteId);
+    }).length;
+
+    return resultCount + photoCount;
+}
+
+function getDraftInfoFromSaveBtn(saveBtn) {
+    const siteId = $("#siteId").val();
+    const itemId = saveBtn.dataset.itemId;
+    const categoryGroup = saveBtn.dataset.categoryGroup;
+    const subItemId = getSubItemIdFromButton(saveBtn);
+    const draftKey = makeDraftKey(siteId, itemId, categoryGroup, subItemId);
+
+    return {
+        siteId,
+        itemId,
+        categoryGroup,
+        subItemId,
+        draftKey
+    };
+}
+
+function markItemCardByTargetBoxes(itemCard) {
+    refreshOneItemCardState(itemCard);
 }
