@@ -11,6 +11,7 @@ public class SyncResultItem {
     private String categoryGroup;
     private String result;
     private String memo;
+    private Long subItemId;
 
     public void setDraftKey(String draftKey) {
         this.draftKey = draftKey;

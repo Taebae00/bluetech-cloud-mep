@@ -62,4 +62,20 @@ public interface InspectionResultRepo extends JpaRepository<InspectionResultEnti
             @Param("oldLocationName") String oldLocationName,
             @Param("newLocationName") String newLocationName
     );
+
+    Optional<InspectionResultEntity> findFirstBySiteIdAndItemIdAndCategoryGroupAndSubItemIdOrderByIdDesc(
+            Long siteId,
+            Long itemId,
+            String categoryGroup,
+            Long subItemId
+    );
+
+    Optional<InspectionResultEntity> findFirstBySiteIdAndItemIdAndCategoryGroupAndSubItemIdIsNullOrderByIdDesc(
+            Long siteId,
+            Long itemId,
+            String categoryGroup
+    );
+
+
+
 }

@@ -25,6 +25,7 @@ import java.io.InputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -49,20 +50,34 @@ public class SitePhotoService {
     public void downloadSelectedZip(Long siteId,
                                     List<Long> itemIds,
                                     List<String> categoryGroups,
+                                    List<Long> subItemIds,
                                     HttpServletResponse response) throws IOException {
 
         List<InspectionResultEntity> results = resultRepo.findBySiteId(siteId);
 
         Set<String> selectedKeys = new HashSet<>();
-        for (int i = 0; i < Math.min(itemIds.size(), categoryGroups.size()); i++) {
-            selectedKeys.add(itemIds.get(i) + "::" + categoryGroups.get(i));
+
+        for (int i = 0; i < itemIds.size(); i++) {
+            Long itemId = itemIds.get(i);
+            String categoryGroup = categoryGroups.get(i);
+            Long subItemId = normalizeSubItemId(subItemIds.get(i));
+
+            selectedKeys.add(itemId + "::" + categoryGroup + "::" + subItemId);
         }
 
         List<InspectionResultEntity> filteredResults = results.stream()
-                .filter(result -> selectedKeys.contains(result.getItemId() + "::" + result.getCategoryGroup()))
+                .filter(result -> {
+                    Long subItemId = normalizeSubItemId(result.getSubItemId());
+                    String key = result.getItemId() + "::" + result.getCategoryGroup() + "::" + subItemId;
+                    return selectedKeys.contains(key);
+                })
                 .toList();
 
         writeZip(siteId, filteredResults, response);
+    }
+
+    private Long normalizeSubItemId(Long subItemId) {
+        return (subItemId == null || subItemId == 0) ? 0L : subItemId;
     }
 
     private void writeZip(Long siteId,
@@ -80,13 +95,20 @@ public class SitePhotoService {
         );
 
         Map<Long, InspectionResultEntity> resultMap = new HashMap<>();
+
         for (InspectionResultEntity result : targetResults) {
-            resultMap.put(result.getId(), result);
+            if (result.getId() != null) {
+                resultMap.put(result.getId(), result);
+            }
         }
 
-        Map<Long, InspectionItemEntity> itemCache = new HashMap<>();
-        List<PhotoEntity> allPhotos = photoRepo.findAll();
+        Set<Long> resultIds = resultMap.keySet();
 
+        List<PhotoEntity> allPhotos = resultIds.isEmpty()
+                ? Collections.emptyList()
+                : photoRepo.findByResultIdIn(resultIds);
+
+        Map<Long, InspectionItemEntity> itemCache = new HashMap<>();
         Set<String> createdDirs = new HashSet<>();
         Map<Long, Integer> photoSeqMap = new HashMap<>();
 
@@ -121,6 +143,7 @@ public class SitePhotoService {
                         zos.putNextEntry(new ZipEntry(naDir));
                         zos.closeEntry();
                     }
+
                     continue;
                 }
 
@@ -141,9 +164,7 @@ public class SitePhotoService {
                                     locationName + "_풍량측정표.xlsx"
                     );
 
-                    String zipPath = resultDir + "/" + excelFileName;
-
-                    zos.putNextEntry(new ZipEntry(zipPath));
+                    zos.putNextEntry(new ZipEntry(resultDir + "/" + excelFileName));
                     zos.write(excelBytes);
                     zos.closeEntry();
 
@@ -161,9 +182,7 @@ public class SitePhotoService {
                                     locationName + "_효율시트.xlsx"
                     );
 
-                    String zipPath = resultDir + "/" + excelFileName;
-
-                    zos.putNextEntry(new ZipEntry(zipPath));
+                    zos.putNextEntry(new ZipEntry(resultDir + "/" + excelFileName));
                     zos.write(excelBytes);
                     zos.closeEntry();
 
@@ -181,9 +200,7 @@ public class SitePhotoService {
                                     locationName + "_풍량조절표.xlsx"
                     );
 
-                    String zipPath = resultDir + "/" + excelFileName;
-
-                    zos.putNextEntry(new ZipEntry(zipPath));
+                    zos.putNextEntry(new ZipEntry(resultDir + "/" + excelFileName));
                     zos.write(excelBytes);
                     zos.closeEntry();
 
@@ -194,8 +211,6 @@ public class SitePhotoService {
                                     locationName + "_메모.txt"
                     );
 
-                    String zipPath = resultDir + "/" + txtFileName;
-
                     String textContent = ""
                             + "대주제: " + item.getCategory() + System.lineSeparator()
                             + "세부점검사항: " + item.getContent() + System.lineSeparator()
@@ -203,7 +218,7 @@ public class SitePhotoService {
                             + "점검결과: " + resultValue + System.lineSeparator()
                             + "메모: " + memo + System.lineSeparator();
 
-                    zos.putNextEntry(new ZipEntry(zipPath));
+                    zos.putNextEntry(new ZipEntry(resultDir + "/" + txtFileName));
                     zos.write(textContent.getBytes(StandardCharsets.UTF_8));
                     zos.closeEntry();
                 }

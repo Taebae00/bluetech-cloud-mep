@@ -262,7 +262,10 @@ public class MainController {
             fillSubItems(baseGroupedItems);
         }
 
-        List<InspectionResultDTO> resultList = inspectionResultService.getResultsBySiteId(siteId);
+        List<InspectionResultDTO> resultList =
+                new ArrayList<>(inspectionResultService.getResultsBySiteId(siteId));
+
+        Collections.reverse(resultList);
 
         Map<String, Boolean> completedMap = new HashMap<>();
         Map<String, String> resultValueMap = new HashMap<>();
@@ -452,12 +455,14 @@ public class MainController {
             }
         }
 
-        // ✅ 성능점검(서울형)은 locationList fragment를 다시 불러올 때도 세부항목을 넣어줘야 함
         if ("성능점검(서울형)".equals(siteWorkType)) {
             fillSubItems(baseGroupedItems);
         }
 
-        List<InspectionResultDTO> resultList = inspectionResultService.getResultsBySiteId(siteId);
+        List<InspectionResultDTO> resultList =
+                new ArrayList<>(inspectionResultService.getResultsBySiteId(siteId));
+
+        Collections.reverse(resultList);
 
         Map<String, List<Map<String, Object>>> locationViewMap = new LinkedHashMap<>();
         for (String baseCategory : baseGroupedItems.keySet()) {
@@ -604,14 +609,16 @@ public class MainController {
     @ResponseBody
     public Map<String, Object> getInspectionDetail(@RequestParam Long siteId,
                                                    @RequestParam Long itemId,
-                                                   @RequestParam String categoryGroup) {
+                                                   @RequestParam String categoryGroup,
+                                                   @RequestParam(required = false, defaultValue = "0") Long subItemId) {
 
         Map<String, Object> resultMap = new HashMap<>();
 
         InspectionResultEntity resultEntity =
-                inspectionResultService.getInspectionResult(siteId, itemId, categoryGroup);
+                inspectionResultService.getInspectionResult(siteId, itemId, categoryGroup, subItemId);
 
         if (resultEntity == null) {
+            resultMap.put("result", "미작성");
             resultMap.put("memo", "");
             resultMap.put("photos", new ArrayList<>());
             return resultMap;
@@ -737,6 +744,7 @@ public class MainController {
     public ResponseEntity<?> resetInspection(@RequestParam Long siteId,
                                              @RequestParam Long itemId,
                                              @RequestParam String categoryGroup,
+                                             @RequestParam(required = false, defaultValue = "0") Long subItemId,
                                              @RequestParam String targetResult,
                                              HttpSession session) {
 
@@ -745,7 +753,7 @@ public class MainController {
             return ResponseEntity.status(401).body("로그인 필요");
         }
 
-        inspectionResultService.resetInspection(siteId, itemId, categoryGroup, targetResult);
+        inspectionResultService.resetInspection(siteId, itemId, categoryGroup, subItemId, targetResult);
         return ResponseEntity.ok().build();
     }
 
@@ -916,19 +924,25 @@ public class MainController {
 
         List<Long> itemIds = request.getItemIds() == null ? new ArrayList<>() : request.getItemIds();
         List<String> categoryGroups = request.getCategoryGroups() == null ? new ArrayList<>() : request.getCategoryGroups();
+        List<Long> subItemIds = request.getSubItemIds() == null ? new ArrayList<>() : request.getSubItemIds();
 
-        if (itemIds.isEmpty() || categoryGroups.isEmpty() || itemIds.size() != categoryGroups.size()) {
+        if (itemIds.isEmpty()
+                || categoryGroups.isEmpty()
+                || subItemIds.isEmpty()
+                || itemIds.size() != categoryGroups.size()
+                || itemIds.size() != subItemIds.size()) {
             response.sendError(HttpServletResponse.SC_BAD_REQUEST, "다운로드 항목 정보가 올바르지 않습니다.");
             return;
         }
 
-        sitePhotoService.downloadSelectedZip(siteId, itemIds, categoryGroups, response);
+        sitePhotoService.downloadSelectedZip(siteId, itemIds, categoryGroups, subItemIds, response);
     }
 
 
     public static class DownloadSelectedRequest {
         private List<Long> itemIds;
         private List<String> categoryGroups;
+        private List<Long> subItemIds;
 
         public List<Long> getItemIds() {
             return itemIds;
@@ -944,6 +958,14 @@ public class MainController {
 
         public void setCategoryGroups(List<String> categoryGroups) {
             this.categoryGroups = categoryGroups;
+        }
+
+        public List<Long> getSubItemIds() {
+            return subItemIds;
+        }
+
+        public void setSubItemIds(List<Long> subItemIds) {
+            this.subItemIds = subItemIds;
         }
     }
 

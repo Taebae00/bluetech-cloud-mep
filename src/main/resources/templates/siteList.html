@@ -14,7 +14,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="BlueCheck">
 
-    <link rel="stylesheet" href="/css/site-list.css">
+    <link rel="stylesheet" href="/css/site-list.css?v=20260628">
 </head>
 <body>
 
@@ -28,6 +28,9 @@
         </div>
 
         <div class="top-btns">
+            <button type="button" class="diagnosis-btn" onclick="openStorageDiagnosis()">
+                저장공간 진단
+            </button>
             <button type="button"
                     class="admin-btn"
                     th:if="${#strings.equalsIgnoreCase(userRole, 'ADMIN')}"
@@ -124,8 +127,29 @@
         </div>
     </div>
 </div>
+<div id="storageDiagnosisModal" class="sync-status-modal" style="display:none;">
+    <div class="sync-status-modal-content">
+        <div class="sync-status-title">저장공간 진단</div>
+
+        <div id="storageDiagnosisText"
+             class="sync-status-subtext"
+             style="white-space: pre-line; text-align:left;">
+            확인 중...
+        </div>
+
+        <div class="sync-status-btn-wrap">
+            <button type="button"
+                    class="sync-status-close-btn"
+                    onclick="closeStorageDiagnosis()">
+                닫기
+            </button>
+        </div>
+    </div>
+</div>
+
 <div th:replace="~{fragments/footer :: footer}"></div>
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script th:src="@{/js/InsertSite.js}"></script>
+<script src="/js/offline-db.js?v=20260628"></script>
+<script src="/js/InsertSite.js?v=20260628"></script>
 </body>
 </html>

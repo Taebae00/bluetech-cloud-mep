@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="BlueCheck">
-    <link rel="stylesheet" href="/css/site-write.css">
+    <link rel="stylesheet" href="/css/site-write.css?v=20260628">
 </head>
 <body>
 
@@ -48,9 +48,15 @@
 
     <input type="hidden" id="siteId" th:value="${siteId}">
 
-    <button type="button" class="sync-btn" onclick="syncOfflineData()">
-        동기화
-    </button>
+    <div class="sync-action-row">
+        <button type="button" class="sync-btn" onclick="syncOfflineData()">
+            동기화
+        </button>
+
+        <button type="button" class="diagnosis-btn" onclick="openStorageDiagnosis()">
+            저장공간 진단
+        </button>
+    </div>
 
     <div id="syncStatusModal" class="sync-status-modal" style="display:none;">
         <div class="sync-status-modal-content">
@@ -70,6 +76,26 @@
                         onclick="closeSyncStatusModal()"
                         disabled>
                     완료
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="storageDiagnosisModal" class="sync-status-modal" style="display:none;">
+        <div class="sync-status-modal-content">
+            <div class="sync-status-title">저장공간 진단</div>
+
+            <div id="storageDiagnosisText"
+                 class="sync-status-subtext"
+                 style="white-space: pre-line; text-align:left;">
+                확인 중...
+            </div>
+
+            <div class="sync-status-btn-wrap">
+                <button type="button"
+                        class="sync-status-close-btn"
+                        onclick="closeStorageDiagnosis()">
+                    닫기
                 </button>
             </div>
         </div>
@@ -111,6 +137,7 @@
                                 </button>
                             </div>
                         </div>
+
 
                         <div class="item-editor">
                             <div class="photo-grid editor-photo-grid">
@@ -159,6 +186,7 @@
                                 <button type="button"
                                         class="inline-save-btn"
                                         th:data-item-id="${item.id}"
+                                        data-sub-item-id="0"
                                         th:data-category-group="${entry.key}"
                                         onclick="saveInlineInspection(this)"
                                         style="display:none;">
@@ -345,7 +373,7 @@
 </div>
 <div th:replace="~{fragments/footer :: footer}"></div>
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script src="/js/offline-db.js"></script>
-<script src="/js/siteWrite.js"></script>
+<script src="/js/offline-db.js?v=20260628"></script>
+<script src="/js/siteWrite.js?v=20260628"></script>
 </body>
 </html>
